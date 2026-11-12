@@ -6,7 +6,7 @@
  */
 
 import { store, CATEGORIES, CAT, monthStats, shiftMonth, merchantKey, todayISO } from './store.js';
-import { parseFile, parseText } from './parser.js';
+import { parseFile, parseText, extractTransactions } from './parser.js';
 
 /* =========================================================================
  *  Helpers
@@ -39,7 +39,7 @@ function fmtDay(iso, long = false) {
 }
 const monthLabel = m => monthFmt.format(isoToDate(m + '-01'));
 
-const SOURCE_LABEL = { eml: 'E-mail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka' };
+const SOURCE_LABEL = { eml: 'E-mail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', gmail: 'Gmail' };
 const plural = (n, one, few, many) => `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
 
 /* =========================================================================
@@ -109,9 +109,12 @@ function renderInbox() {
         <h2>Všetko vyriešené</h2>
         <p>Žiadne platby nečakajú na schválenie.</p>
         <div class="row">
-          <button class="btn" data-action="paste">📋 Zo schránky</button>
+          ${gmailConnected()
+            ? '<button class="btn" data-action="gmail-sync">↻ Skontrolovať Gmail</button>'
+            : '<button class="btn" data-action="paste">📋 Zo schránky</button>'}
           <button class="btn" data-action="import">📥 Import</button>
         </div>
+        ${gmailStatusLine()}
       </div>
       ${recentApprovedHTML()}`;
     return;
@@ -125,7 +128,9 @@ function renderInbox() {
     <div class="inbox-head">
       <div class="inbox-head__count"><b>${list.length}</b> ${list.length === 1 ? 'čaká' : 'čakajú'} na schválenie</div>
       ${known.length > 1 ? `<button class="btn btn--sm" data-action="bulk">Schváliť známe (${known.length})</button>`
-        : `<button class="btn btn--sm" data-action="paste">📋 Vložiť</button>`}
+        : gmailConnected()
+          ? `<button class="btn btn--sm" data-action="gmail-sync">↻ Gmail</button>`
+          : `<button class="btn btn--sm" data-action="paste">📋 Vložiť</button>`}
     </div>
     <div class="stack">
       ${list.length > 2 ? '<div class="stack__ghost stack__ghost--2"></div>' : ''}
@@ -675,6 +680,7 @@ function openSettings() {
     html: `
       <div class="section-title">Import platieb</div>
       <div class="glass list settings-group">
+        ${row('gmail', '📬', 'Automatický import z Gmailu', gmailConnected() ? `Pripojené · ${esc(gmailLastText())}` : 'Platby z mailov banky sa načítajú samé')}
         ${row('import', '📥', 'Vybrať súbory', 'E-mail (.eml), PDF výpis, .txt — aj viac naraz')}
         ${row('paste', '📋', 'Vložiť zo schránky', 'Skopírovaný text bankovej notifikácie')}
         ${row('paste-manual', '✍️', 'Vložiť text ručne')}
@@ -704,7 +710,8 @@ function openSettings() {
         const b = e.target.closest('[data-action]');
         if (!b) return;
         const a = b.dataset.action;
-        if (a === 'import') { close(); $('#file-input').click(); }
+        if (a === 'gmail') openGmailSheet();
+        else if (a === 'import') { close(); $('#file-input').click(); }
         else if (a === 'paste') { close(); pasteFromClipboard(); }
         else if (a === 'paste-manual') openPasteSheet();
         else if (a === 'guide') openGuide();
@@ -778,6 +785,7 @@ function openGuide() {
     html: `
       <div class="glass guide">
         <p><b>Cieľ:</b> keď ti príde mail od banky, platba sa sama pripraví a v appke ju schváliš jedným ťuknutím.</p>
+        <div class="note"><b>Používaš Gmail?</b> Jednoduchšie je <b>⚙️ → Automatický import z Gmailu</b>. Funguje bez Skratiek a bez ťukania: platby čakajú v appke hneď, ako ju otvoríš.</div>
         <div class="note"><b>Prečo nie <code>financie://</code>?</b> iOS nedovoľuje webovým appkám registrovať vlastnú URL schému. Rovnakú úlohu plní tento https odkaz s parametrami — funguje identicky, a ak appku raz zabalíš do natívneho obalu, parametre ostanú rovnaké.</div>
       </div>
 
@@ -980,6 +988,166 @@ function consumeLaunchURL() {
 }
 
 /* =========================================================================
+ *  Automatický import z Gmailu (cez Google Apps Script v účte používateľa)
+ * ========================================================================= */
+const GMAIL_THROTTLE_MS = 60_000;
+const GMAIL_SCRIPT_URL = 'https://github.com/gregorihnat01-bot/financie/blob/main/apps-script/Code.gs';
+let gmailBusy = false;
+let gmailLastAttempt = 0;
+
+const gmailConnected = () => Boolean(store.state.settings.gmailUrl && store.state.settings.gmailToken);
+
+function relTime(ms) {
+  if (!ms) return 'ešte nikdy';
+  const min = Math.round((Date.now() - ms) / 60000);
+  if (min < 1) return 'práve teraz';
+  if (min < 60) return `pred ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `pred ${h} h`;
+  return dayFmt.format(new Date(ms));
+}
+const gmailLastText = () => store.state.settings.gmailError
+  ? `⚠️ ${store.state.settings.gmailError}`
+  : `kontrola ${relTime(store.state.settings.gmailLastOk)}`;
+
+function gmailStatusLine() {
+  if (!gmailConnected()) return '';
+  return `<p class="muted small" style="margin-top:14px">📬 Gmail · ${esc(gmailLastText())}</p>`;
+}
+
+/** Rozdelí odkaz "https://script.google.com/macros/s/…/exec?token=…" na adresu a kľúč. */
+function parseGmailLink(input) {
+  let u;
+  try { u = new URL(String(input).trim()); } catch { throw new Error('Toto nie je platný odkaz.'); }
+  if (!/^script\.google(usercontent)?\.com$/.test(u.hostname)) throw new Error('Odkaz musí byť zo script.google.com.');
+  if (u.pathname.endsWith('/dev')) throw new Error('Použi adresu nasadenia končiacu na /exec, nie /dev.');
+  const token = u.searchParams.get('token');
+  if (!token) throw new Error('V odkaze chýba ?token=… — skopíruj celý riadok z protokolu.');
+  u.searchParams.delete('token');
+  return { gmailUrl: u.toString(), gmailToken: token };
+}
+
+async function fetchGmail(cfg, after) {
+  const sep = cfg.gmailUrl.includes('?') ? '&' : '?';
+  const url = `${cfg.gmailUrl}${sep}token=${encodeURIComponent(cfg.gmailToken)}&after=${after}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, redirect: 'follow', cache: 'no-store' });
+    if (!res.ok) throw new Error(`Skript vrátil chybu ${res.status}`);
+    let data;
+    try { data = await res.json(); }
+    catch { throw new Error('Skript nevracia dáta. Je nasadený s prístupom „Ktokoľvek“?'); }
+    if (!data.ok) throw new Error(data.error === 'unauthorized' ? 'Nesprávny kľúč. Skopíruj odkaz z protokolu znova.' : data.error || 'Neznáma chyba skriptu');
+    return data;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Gmail skript neodpovedá. Skús to o chvíľu.');
+    if (e instanceof TypeError) throw new Error(navigator.onLine ? 'Nepodarilo sa spojiť so skriptom.' : 'Si offline.');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Stiahne nové notifikácie, rozparsuje ich tým istým parserom ako import EML a pridá do inboxu. */
+async function syncGmail({ manual = false } = {}) {
+  const cfg = store.state.settings;
+  if (!gmailConnected()) { if (manual) openGmailSheet(); return null; }
+  if (gmailBusy) return null;
+  if (!manual && Date.now() - gmailLastAttempt < GMAIL_THROTTLE_MS) return null;
+  gmailBusy = true;
+  gmailLastAttempt = Date.now();
+  if (manual) toast('Kontrolujem Gmail…');
+  try {
+    // 2 dni prekryv kvôli oneskoreným mailom; duplicity stráži zoznam ID správ
+    const after = cfg.gmailLastSync ? cfg.gmailLastSync - 2 * 86400 : 0;
+    const data = await fetchGmail(cfg, after);
+    const seen = new Set(cfg.gmailSeen || []);
+    const parsed = [];
+    for (const item of data.items || []) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      parsed.push(...extractTransactions(`${item.subject}\n${item.text}`, {
+        source: 'gmail', subject: item.subject, fallbackDate: String(item.date).slice(0, 10),
+      }));
+    }
+    const { added } = parsed.length ? store.addTransactions(parsed) : { added: 0 };
+    store.setSettings({ gmailLastSync: data.now, gmailSeen: [...seen].slice(-500), gmailLastOk: Date.now(), gmailError: '' });
+    if (added) toast(`📬 ${plural(added, 'nová platba', 'nové platby', 'nových platieb')} z Gmailu`);
+    else if (manual) toast('Žiadne nové platby');
+    return added;
+  } catch (e) {
+    store.setSetting('gmailError', e.message);
+    if (manual) toast(e.message);
+    return null;
+  } finally {
+    gmailBusy = false;
+  }
+}
+
+function openGmailSheet() {
+  const s = store.state.settings;
+  const connected = gmailConnected();
+  openSheet({
+    title: 'Import z Gmailu',
+    html: `
+      <div class="glass guide">
+        ${connected
+          ? `<p><b>✅ Pripojené.</b> Nové platby sa načítajú pri každom otvorení appky.</p>
+             <p class="muted small" style="margin-top:6px">${esc(gmailLastText())}</p>`
+          : `<p>Malý skript vo <b>tvojom</b> Google účte číta notifikácie banky. Appka si ich pri otvorení stiahne a platby čakajú v inboxe na schválenie.</p>`}
+      </div>
+
+      <label class="field" style="margin-top:14px">
+        <span class="field__label">Odkaz z Apps Scriptu (s ?token=…)</span>
+        <input class="input" id="gmail-link" type="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+          placeholder="https://script.google.com/macros/s/…/exec?token=…"
+          value="${connected ? esc(`${s.gmailUrl}${s.gmailUrl.includes('?') ? '&' : '?'}token=${s.gmailToken}`) : ''}">
+      </label>
+      <button class="btn btn--primary btn--block" id="gmail-save">${connected ? 'Uložiť a skontrolovať' : 'Pripojiť'}</button>
+      ${connected ? `
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="gmail-now">↻ Skontrolovať teraz</button>
+          <button class="btn btn--danger" id="gmail-off">Odpojiť</button>
+        </div>` : ''}
+
+      <div class="section-title">Nastavenie (raz, cca 5 minút — najľahšie na počítači)</div>
+      <div class="glass guide">
+        <ol>
+          <li>Otvor <b>script.google.com</b> → <b>Nový projekt</b>.</li>
+          <li>Obsah súboru <code>Code.gs</code> nahraď skriptom z GitHubu:
+            <code class="code">${esc(GMAIL_SCRIPT_URL)}</code>
+            a ulož (⌘S / Ctrl+S).</li>
+          <li><b>Nasadiť → Nové nasadenie</b> → ozubené koliesko → <b>Webová aplikácia</b>.<br>
+            Spustiť ako: <b>Ja</b> · Kto má prístup: <b>Ktokoľvek</b> → <b>Nasadiť</b>.</li>
+          <li>Povoľ prístup ku Gmailu. Google ukáže varovanie „neoverená aplikácia“, lebo skript je tvoj vlastný: <b>Rozšírené → Prejsť na projekt</b>.</li>
+          <li>Hore vyber funkciu <b>setup</b> → <b>Spustiť</b>. V <b>Protokole vykonávania</b> sa objaví riadok <i>ODKAZ PRE APPKU</i>.</li>
+          <li>Ten odkaz vlož sem vyššie a ťukni na <b>Pripojiť</b>.</li>
+        </ol>
+        <div class="note"><b>Bezpečnosť:</b> skript Gmail iba číta, a len maily od banky (ČSOB <code>info@servis.csob.sk</code>). Odkaz s kľúčom nikomu neposielaj. Ak unikne, spusti v skripte <code>resetToken</code>.</div>
+      </div>`,
+    onMount(sheet, close) {
+      $('#gmail-save', sheet).addEventListener('click', async () => {
+        let cfg;
+        try { cfg = parseGmailLink($('#gmail-link', sheet).value); }
+        catch (e) { toast(e.message); return; }
+        const changed = cfg.gmailUrl !== s.gmailUrl || cfg.gmailToken !== s.gmailToken;
+        store.setSettings({ ...cfg, ...(changed ? { gmailLastSync: 0, gmailError: '' } : {}) });
+        close();
+        const added = await syncGmail({ manual: true });
+        if (added !== null) setTab('inbox');
+      });
+      $('#gmail-now', sheet)?.addEventListener('click', () => { close(); syncGmail({ manual: true }); });
+      $('#gmail-off', sheet)?.addEventListener('click', () => {
+        store.setSettings({ gmailUrl: '', gmailToken: '', gmailLastSync: 0, gmailError: '' });
+        close();
+        toast('Gmail odpojený');
+      });
+    },
+  });
+}
+
+/* =========================================================================
  *  Toast
  * ========================================================================= */
 let toastTimer = null;
@@ -1022,6 +1190,7 @@ function bindEvents() {
         break;
       }
       case 'paste': pasteFromClipboard(); break;
+      case 'gmail-sync': syncGmail({ manual: true }); break;
       case 'import': $('#file-input').click(); break;
       case 'edit-tx': openEditSheet(id); break;
     }
@@ -1100,6 +1269,10 @@ store.subscribe((_, reason) => {
 bindEvents();
 setTab('inbox');
 consumeLaunchURL();
+
+// Automatický import z Gmailu: pri štarte a pri každom návrate do appky
+syncGmail();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncGmail(); });
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

@@ -36,13 +36,13 @@ export const KIND_LABEL = {
 /* ---------- Heuristiky pre prvý návrh (kým neexistuje naučené pravidlo) ---------- */
 const KEYWORDS = [
   ['groceries', ['lidl', 'tesco', 'kaufland', 'billa', 'coop', 'jednota', 'terno', 'fresh', 'albert', 'dm drogerie', 'dm ', 'teta', 'rossmann', 'ikea', 'hornbach', 'obi', 'potraviny', 'action', 'pepco', 'kik']],
-  ['transport', ['shell', 'omv', 'slovnaft', 'orlen', 'mol ', 'benzin', 'cerpacia', 'parking', 'parkov', 'bolt', 'uber', 'zssk', 'regiojet', 'leo express', 'dpb', 'imhd', 'mhd', 'dialnic', 'eznamka', 'vinet', 'autoservis', 'pneu']],
+  ['transport', ['shell', 'omv', 'slovnaft', 'orlen', 'mol ', 'benzin', 'cerpacia', 'parking', 'parkov', 'bolt', 'uber', 'zssk', 'regiojet', 'leo express', 'dpb', 'imhd', 'mhd', 'dialnic', 'eznamka', 'dpmp', 'dpmk', 'dpmz', 'dopravny podnik', 'arriva', 'slovak lines', 'flixbus', 'vinet', 'autoservis', 'pneu']],
   ['fun', ['restaur', 'bistro', 'pizza', 'burger', 'mcdonald', 'kfc', 'starbucks', 'kaviar', 'cafe', 'coffee', 'kava', 'bar ', 'pub', 'wolt', 'foodora', 'bolt food', 'kino', 'cinema', 'cinemax', 'ticket', 'steam', 'playstation', 'xbox']],
   ['housing', ['najom', 'najomne', 'hypo', 'zse', 'spp', 'vodaren', 'bvs', 'elektr', 'plyn', 'energ', 'sprava domu', 'bytove', 'fond oprav', 'poistenie', 'allianz', 'generali', 'kooperativa', 'union']],
   ['subs', ['netflix', 'spotify', 'apple.com', 'apple com', 'icloud', 'google', 'youtube', 'disney', 'hbo', 'max.com', 'amazon prime', 'orange', 'telekom', 'o2 ', 'swan', '4ka', 'chatgpt', 'openai', 'anthropic', 'claude', 'microsoft', 'adobe', 'patreon', 'fitness', 'gym']],
   ['invest', ['xtb', 'trading 212', 'trading212', 'revolut invest', 'finax', 'portu', 'etf', 'sporenie', 'sporiaci', 'dds', 'doplnkov', 'nn ', 'investic', 'binance', 'coinbase', 'anycoin']],
   ['income', ['mzda', 'vyplata', 'plat ', 'salary', 'odmena', 'dividend', 'urok', 'vratka', 'refund', 'prijata platba']],
-  ['transfer', ['prevod', 'vlastny ucet', 'medzi uctami', 'vyber atm', 'bankomat', 'atm ', 'revolut top', 'top-up', 'dobitie']],
+  ['transfer', ['ucet *', 'prevod', 'vlastny ucet', 'medzi uctami', 'vyber atm', 'bankomat', 'atm ', 'revolut top', 'top-up', 'dobitie']],
 ];
 
 /* ---------- Pomocné funkcie ---------- */
@@ -311,6 +311,12 @@ export const store = {
 
   setSetting(key, value) {
     state.settings[key] = value;
+    commit('settings');
+  },
+
+  /** Viac nastavení naraz = jeden zápis a jedno prekreslenie. */
+  setSettings(patch) {
+    Object.assign(state.settings, patch);
     commit('settings');
   },
 

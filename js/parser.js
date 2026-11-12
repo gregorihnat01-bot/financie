@@ -297,7 +297,32 @@ function findAmounts(text) {
   return out;
 }
 
+/**
+ * Formát "popis na samostatnom riadku, hodnota pod ním" (napr. ČSOB):
+ *   Suma
+ *   22,14 EUR
+ *   Miesto
+ *   ANTHROPIC* CLAUDE SUB
+ */
+function labelValue(lines, labels) {
+  for (const label of labels) {
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (norm(lines[i]).replace(/[:\s]+$/, '') === label) return lines[i + 1].trim();
+    }
+  }
+  return '';
+}
+
+const OWN_LINE_MERCHANT = ['miesto', 'miesto transakcie', 'obchodnik', 'nazov obchodnika', 'nazov protistrany', 'protistrana', 'prijemca', 'platitel', 'protiucet'];
+
 function findMerchant(lines) {
+  const own = labelValue(lines, OWN_LINE_MERCHANT);
+  if (own) {
+    // maskovaný protiúčet "**** 1642" → "Účet ****1642"
+    if (/^\*{2,}\s?\d{2,6}$/.test(own)) return `Účet ${own.replace(/\s/g, '')}`;
+    const v = cleanMerchant(own);
+    if (v.length > 1) return v;
+  }
   for (const label of MERCHANT_LABELS) {
     for (let i = 0; i < lines.length; i++) {
       const l = norm(lines[i]);
@@ -330,7 +355,10 @@ function decideSign(value, explicitSign, context) {
  * @param {{source:string, statement?:boolean, fallbackDate?:string, subject?:string}} opts
  */
 export function extractTransactions(text, opts = {}) {
-  const src = String(text || '').replace(/\r/g, '').replace(/[\u00a0\u202f]/g, ' ');
+  const src = String(text || '')
+    .replace(/\r/g, '')
+    .replace(/[\u00a0\u202f]/g, ' ')
+    .replace(/[\u00ad\u034f\u200b-\u200d\u2060\ufeff]/g, ''); // neviditeľné znaky z preheaderov
   const lines = src.split('\n').map(l => l.trim()).filter(Boolean);
   if (!lines.length) return [];
 
@@ -351,16 +379,28 @@ function parseNotification(src, lines, opts) {
   const context = src.slice(Math.max(0, pick.index - 200), pick.index + 60) + ' ' + (opts.subject || '');
   const amount = decideSign(pick.value, pick.explicitSign, context);
 
-  const dateLine = lines.find(l => /d[aá]tum|dňa|date|zaúčtovan|transakci/i.test(l) && RE_DATE.test(l));
+  const dateLine = labelValue(lines, ['datum', 'datum transakcie', 'datum zauctovania']) ||
+    lines.find(l => /d[aá]tum|dňa|date|zaúčtovan|transakci/i.test(l) && RE_DATE.test(l));
   const date = parseDate(dateLine || '') || parseDate(src) || opts.fallbackDate || todayISO();
 
   let merchant = findMerchant(lines);
-  if (!merchant && opts.subject) merchant = cleanMerchant(opts.subject);
+  const subjectIsGeneric = !opts.subject || RE_AMOUNT_CUR.test(opts.subject) || /^(transakcia|pohyb|platba|notifik)/i.test(opts.subject);
+  RE_AMOUNT_CUR.lastIndex = 0;
+  if (!merchant && opts.subject && !subjectIsGeneric) merchant = cleanMerchant(opts.subject);
+
+  // Poznámka: mesto (ak to nie je telefón) a účel platby (ak nie je predvyplnený bankou)
+  const city = labelValue(lines, ['mesto']);
+  const purpose = labelValue(lines, ['ucel platby', 'sprava pre prijemcu', 'sprava pre prijimatela', 'poznamka']);
+  const note = [
+    city && !/^\+?\d[\d\s]{5,}$/.test(city) ? city : '',
+    purpose && !/^miesto pre pozn/i.test(norm(purpose)) ? purpose : '',
+  ].filter(Boolean).join(' · ') || (subjectIsGeneric ? '' : opts.subject?.slice(0, 120) || '');
+
   return {
     date,
     amount,
     merchant: merchant || 'Neznáma platba',
-    note: opts.subject && merchant !== cleanMerchant(opts.subject) ? opts.subject.slice(0, 120) : '',
+    note: note.slice(0, 120),
     source: opts.source || 'text',
   };
 }
