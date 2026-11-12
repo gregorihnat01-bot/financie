@@ -54,7 +54,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '7';
+const APP_VERSION = '8';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -1034,11 +1034,13 @@ function parseGmailLink(input) {
 
 async function fetchGmail(cfg, after) {
   const sep = cfg.gmailUrl.includes('?') ? '&' : '?';
-  const url = `${cfg.gmailUrl}${sep}token=${encodeURIComponent(cfg.gmailToken)}&after=${after}`;
+  // _= mení adresu pri každom volaní (namiesto cache: 'no-store', kvôli ktorému Safari pridáva hlavičky
+  // a Google takú požiadavku odmietne cez CORS)
+  const url = `${cfg.gmailUrl}${sep}token=${encodeURIComponent(cfg.gmailToken)}&after=${after}&_=${Date.now()}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25000);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, redirect: 'follow', cache: 'no-store' });
+    const res = await fetch(url, { signal: ctrl.signal, redirect: 'follow', credentials: 'omit' });
     if (!res.ok) throw new Error(`Skript vrátil chybu ${res.status}`);
     let data;
     try { data = await res.json(); }

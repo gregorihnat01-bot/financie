@@ -354,11 +354,25 @@ function decideSign(value, explicitSign, context) {
  * @param {string} text
  * @param {{source:string, statement?:boolean, fallbackDate?:string, subject?:string}} opts
  */
+/**
+ * Gmail (getPlainBody) posiela notifikácie ako Markdown: "## Nadpis", "*hodnota*".
+ * Zvonku odstráni jeden pár hviezdičiek, aby ostali maskované čísla (**** 2878)
+ * aj hviezdičky v názve obchodníka (ANTHROPIC* CLAUDE SUB).
+ */
+function unmarkdown(line) {
+  let l = line.trim().replace(/^#{1,6}\s+/, '');
+  for (const m of ['**', '*', '__', '_']) {
+    if (l.length > m.length * 2 && l.startsWith(m) && l.endsWith(m)) { l = l.slice(m.length, -m.length).trim(); break; }
+  }
+  return l;
+}
+
 export function extractTransactions(text, opts = {}) {
   const src = String(text || '')
     .replace(/\r/g, '')
     .replace(/[\u00a0\u202f]/g, ' ')
-    .replace(/[\u00ad\u034f\u200b-\u200d\u2060\ufeff]/g, ''); // neviditeľné znaky z preheaderov
+    .replace(/[\u00ad\u034f\u200b-\u200d\u2060\ufeff]/g, '') // neviditeľné znaky z preheaderov
+    .split('\n').map(unmarkdown).join('\n');
   const lines = src.split('\n').map(l => l.trim()).filter(Boolean);
   if (!lines.length) return [];
 
