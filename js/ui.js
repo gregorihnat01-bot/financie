@@ -54,7 +54,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '8';
+const APP_VERSION = '9';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -1014,7 +1014,7 @@ const gmailLastText = () => store.state.settings.gmailError
 
 function gmailStatusLine() {
   if (!gmailConnected()) return '';
-  return `<p class="muted small" style="margin-top:14px">📬 Gmail · ${esc(gmailLastText())}</p>`;
+  return `<p class="muted small" style="margin-top:14px">📬 Gmail · ${esc(gmailLastText())} · v${APP_VERSION}</p>`;
 }
 
 /**
@@ -1032,7 +1032,46 @@ function parseGmailLink(input) {
   return { url: u.toString(), token, isDev: u.pathname.endsWith('/dev'), isExec: u.pathname.endsWith('/exec') };
 }
 
+/**
+ * JSONP: odpoveď sa načíta ako <script>, takže na ňu neplatia CORS pravidlá.
+ * Ak skript ešte nepozná ?callback= (stará verzia), zlyhá hneď a použije sa fetch.
+ */
+function jsonp(url, timeoutMs = 25000) {
+  return new Promise((resolve, reject) => {
+    const name = `__financieCb${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const el = document.createElement('script');
+    let done = false;
+    const finish = (fn, v) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      delete window[name];
+      el.remove();
+      fn(v);
+    };
+    const timer = setTimeout(() => finish(reject, new Error('timeout')), timeoutMs);
+    window[name] = data => finish(resolve, data);
+    el.onerror = () => finish(reject, new Error('jsonp-error'));
+    el.onload = () => setTimeout(() => finish(reject, new Error('jsonp-no-callback')), 50);
+    el.src = `${url}&callback=${name}`;
+    document.head.appendChild(el);
+  });
+}
+
 async function fetchGmail(cfg, after) {
+  const base = `${cfg.gmailUrl}${cfg.gmailUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(cfg.gmailToken)}&after=${after}&_=${Date.now()}`;
+  try {
+    const data = await jsonp(base);
+    if (data && data.ok) return data;
+    if (data && data.error === 'unauthorized') throw new Error('Nesprávny kľúč. Skopíruj odkaz z protokolu znova.');
+  } catch (e) {
+    if (e.message.startsWith('Nesprávny')) throw e;
+    // inak skús klasický fetch nižšie
+  }
+  return fetchGmailPlain(cfg, after);
+}
+
+async function fetchGmailPlain(cfg, after) {
   const sep = cfg.gmailUrl.includes('?') ? '&' : '?';
   // _= mení adresu pri každom volaní (namiesto cache: 'no-store', kvôli ktorému Safari pridáva hlavičky
   // a Google takú požiadavku odmietne cez CORS)

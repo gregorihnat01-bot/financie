@@ -57,7 +57,8 @@ function resetToken() {
 function doGet(e) {
   const p = (e && e.parameter) || {};
   const token = PropertiesService.getScriptProperties().getProperty('TOKEN');
-  if (!token || p.token !== token) return json({ ok: false, error: 'unauthorized' });
+  const cb = /^[A-Za-z_$][\w$]{0,63}$/.test(p.callback || '') ? p.callback : '';
+  if (!token || p.token !== token) return json({ ok: false, error: 'unauthorized' }, cb);
 
   const after = Math.max(0, parseInt(p.after || '0', 10) || 0); // unix sekundy
   const threads = GmailApp.search(buildQuery(after), 0, MAX_THREADS);
@@ -79,7 +80,7 @@ function doGet(e) {
   });
 
   items.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-  return json({ ok: true, now: Math.floor(Date.now() / 1000), items: items });
+  return json({ ok: true, now: Math.floor(Date.now() / 1000), items: items }, cb);
 }
 
 /* ---------- Pomocné ---------- */
@@ -106,6 +107,11 @@ function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function json(obj) {
+/** JSON, alebo JSONP (callback) — JSONP funguje aj v appke na ploche iPhonu, kde iOS blokuje fetch. */
+function json(obj, callback) {
+  if (callback) {
+    return ContentService.createTextOutput(callback + '(' + JSON.stringify(obj) + ');')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
