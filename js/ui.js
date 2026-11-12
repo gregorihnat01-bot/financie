@@ -54,7 +54,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '9';
+const APP_VERSION = '10';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -1060,15 +1060,26 @@ function jsonp(url, timeoutMs = 25000) {
 
 async function fetchGmail(cfg, after) {
   const base = `${cfg.gmailUrl}${cfg.gmailUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(cfg.gmailToken)}&after=${after}&_=${Date.now()}`;
+  let jsonpWhy = '';
   try {
     const data = await jsonp(base);
     if (data && data.ok) return data;
     if (data && data.error === 'unauthorized') throw new Error('Nesprávny kľúč. Skopíruj odkaz z protokolu znova.');
+    jsonpWhy = data?.error || 'prázdna odpoveď';
   } catch (e) {
     if (e.message.startsWith('Nesprávny')) throw e;
-    // inak skús klasický fetch nižšie
+    jsonpWhy = {
+      'jsonp-no-callback': 'skript je stará verzia (Deploy → New version)',
+      'jsonp-error': 'Google vrátil chybovú stránku',
+      timeout: 'bez odpovede',
+    }[e.message] || e.message;
   }
-  return fetchGmailPlain(cfg, after);
+  try {
+    return await fetchGmailPlain(cfg, after);
+  } catch (e) {
+    // Diagnostika pre ladenie: ktorý spôsob zlyhal a prečo
+    throw new Error(`${e.message} [JSONP: ${jsonpWhy}]`);
+  }
 }
 
 async function fetchGmailPlain(cfg, after) {
