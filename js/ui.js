@@ -7,6 +7,7 @@
 
 import { store, CATEGORIES, CAT, monthStats, shiftMonth, merchantKey, todayISO } from './store.js';
 import { parseFile, parseText, extractTransactions } from './parser.js';
+import { periodRange, shiftPeriod, collect, buildCsv, buildXlsx, deliver, fileName } from './export.js';
 
 /* =========================================================================
  *  Helpers
@@ -54,7 +55,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '11';
+const APP_VERSION = '12';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -338,6 +339,7 @@ function renderOverview() {
       <div class="glass tile"><div class="tile__label">Výdavky</div><div class="tile__value num">${fmtShort(st.expenses)}</div></div>
       <div class="glass tile"><div class="tile__label">Investované</div><div class="tile__value num">${fmtShort(st.invest)}</div></div>
     </div>
+    <button class="btn btn--block btn--sm" style="margin-top:8px" data-action="export">📊 Export do Excelu</button>
 
     ${st.pending ? `
       <button class="glass alert" data-action="goto-inbox">
@@ -701,7 +703,8 @@ function openSettings() {
 
       <div class="section-title">Dáta · ${plural(n, 'transakcia', 'transakcie', 'transakcií')}</div>
       <div class="glass list settings-group">
-        ${row('export', '💾', 'Exportovať zálohu (JSON)')}
+        ${row('export-xlsx', '📊', 'Export do Excelu / CSV', 'Týždeň, mesiac, rok alebo celkovo')}
+        ${row('export', '💾', 'Exportovať zálohu (JSON)', 'Na obnovenie dát v appke')}
         ${row('restore', '♻️', 'Obnoviť zo zálohy')}
         ${row('demo', '🧪', 'Načítať ukážkové dáta')}
         ${row('wipe', '🗑️', '<span style="color:var(--red)">Vymazať všetky dáta</span>')}
@@ -720,6 +723,7 @@ function openSettings() {
         else if (a === 'install') openInstallGuide();
         else if (a === 'rules') openRules();
         else if (a === 'export') exportBackup();
+        else if (a === 'export-xlsx') openExportSheet();
         else if (a === 'restore') { $('#backup-input').click(); }
         else if (a === 'demo') { loadDemo(); close(); }
         else if (a === 'wipe') {
@@ -844,6 +848,92 @@ function openInstallGuide() {
           <li>Zvoľ <b>Pridať na plochu</b> a potvrď.</li>
         </ol>
         <div class="note">Appka potom beží na celú obrazovku, funguje offline a má vlastnú ikonu.</div>`}</div>`,
+  });
+}
+
+/* =========================================================================
+ *  Export do Excelu / CSV
+ * ========================================================================= */
+const exportPrefs = { kind: 'month', anchor: null, format: 'xlsx', pending: true };
+
+function openExportSheet(preset = {}) {
+  Object.assign(exportPrefs, preset);
+  exportPrefs.anchor ??= todayISO();
+  const seg = (name, options, value) => `
+    <div class="segmented segmented--${options.length}" role="tablist">
+      ${options.map(([v, label]) => `<button type="button" data-${name}="${v}" class="${v === value ? 'is-active' : ''}">${label}</button>`).join('')}
+    </div>`;
+
+  openSheet({
+    title: 'Export',
+    html: `<div id="export-body"></div>`,
+    onMount(sheet, close) {
+      const body = $('#export-body', sheet);
+      const draw = () => {
+        const p = exportPrefs;
+        const range = periodRange(p.kind, p.anchor);
+        const data = collect(range, { includePending: p.pending });
+        const s = data.summary;
+        const atEnd = p.kind !== 'all' && range.to >= todayISO();
+        body.innerHTML = `
+          <div class="field__label">Obdobie</div>
+          ${seg('kind', [['week', 'Týždeň'], ['month', 'Mesiac'], ['year', 'Rok'], ['all', 'Celkovo']], p.kind)}
+          ${p.kind === 'all' ? '' : `
+            <div class="month-nav">
+              <button class="icon-btn" data-shift="-1" aria-label="Predchádzajúce obdobie"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+              <div class="month-nav__label">${esc(range.label)}</div>
+              <button class="icon-btn" data-shift="1" aria-label="Ďalšie obdobie" ${atEnd ? 'disabled style="opacity:.3"' : ''}><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+            </div>`}
+
+          <div class="glass guide" style="margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;gap:12px"><span class="muted">Transakcií</span><b class="num">${data.rows.length}</b></div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px"><span class="muted">Príjmy</span><b class="num pos">${fmt(s.income)}</b></div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px"><span class="muted">Výdavky</span><b class="num">${fmt(s.expenses)}</b></div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px"><span class="muted">Investície</span><b class="num">${fmt(s.invest)}</b></div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px"><span class="muted">Zostatok</span><b class="num ${s.balance >= 0 ? 'pos' : ''}">${fmtSigned(s.balance)}</b></div>
+            ${data.pending ? `<p class="small muted" style="margin-top:8px">⚡ ${plural(data.pending, 'platba čaká', 'platby čakajú', 'platieb čaká')} na schválenie — v súbore budú so stavom „Čaká“, do súhrnu sa nerátajú.</p>` : ''}
+          </div>
+
+          <div class="field__label">Platby</div>
+          ${seg('pending', [['1', 'Všetky'], ['0', 'Len schválené']], p.pending ? '1' : '0')}
+
+          <div class="field__label">Formát</div>
+          ${seg('format', [['xlsx', 'Excel (.xlsx)'], ['csv', 'CSV']], p.format)}
+          <p class="small muted" style="margin:-4px 4px 14px">${p.format === 'xlsx'
+            ? 'Hárky: Transakcie (s filtrom a súčtami), Súhrn podľa kategórií, Po mesiacoch.'
+            : 'Jeden zoznam transakcií. Otvorí sa v Exceli, Numbers aj Google Tabuľkách.'}</p>
+
+          <button class="btn btn--primary btn--block btn--approve" id="export-go" ${data.rows.length ? '' : 'disabled'}>
+            ${data.rows.length ? `Exportovať ${plural(data.rows.length, 'transakciu', 'transakcie', 'transakcií')}` : 'V tomto období nie sú platby'}
+          </button>`;
+      };
+      draw();
+
+      body.addEventListener('click', async e => {
+        const t = e.target.closest('button');
+        if (!t) return;
+        const p = exportPrefs;
+        if (t.dataset.kind) { p.kind = t.dataset.kind; p.anchor = todayISO(); draw(); }
+        else if (t.dataset.shift) { p.anchor = shiftPeriod(p.kind, p.anchor, +t.dataset.shift); draw(); }
+        else if (t.dataset.pending) { p.pending = t.dataset.pending === '1'; draw(); }
+        else if (t.dataset.format) { p.format = t.dataset.format; draw(); }
+        else if (t.id === 'export-go') {
+          t.disabled = true;
+          t.textContent = 'Pripravujem súbor…';
+          try {
+            const range = periodRange(p.kind, p.anchor);
+            const data = collect(range, { includePending: p.pending });
+            const blob = p.format === 'xlsx' ? await buildXlsx(data) : buildCsv(data);
+            const result = await deliver(blob, fileName(range, p.format));
+            if (result !== 'cancelled') { close(); toast(result === 'shared' ? '📊 Export pripravený' : '📊 Súbor stiahnutý'); }
+            else draw();
+          } catch (err) {
+            toast(err.message || 'Export sa nepodaril');
+            draw();
+          }
+        }
+      });
+    },
   });
 }
 
@@ -1286,6 +1376,7 @@ function bindEvents() {
     const b = e.target.closest('[data-action]');
     if (!b) return;
     if (b.dataset.action === 'month') { ui.month = shiftMonth(ui.month, +b.dataset.delta); renderOverview(); }
+    else if (b.dataset.action === 'export') openExportSheet({ kind: 'month', anchor: `${ui.month}-01` });
     else if (b.dataset.action === 'goto-inbox') setTab('inbox');
     else if (b.dataset.action === 'filter-cat') { ui.txFilter = `cat:${b.dataset.cat}`; ui.txQuery = ''; $('#tx-search').value = ''; setTab('tx'); }
   });

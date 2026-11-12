@@ -22,3 +22,14 @@ Appka si ho volá pri štarte a pri každom návrate do appky a platby rozpozná
 4. V appke ⚙️ → Automatický import z Gmailu → vlož odkaz → Pripojiť.
 
 Po úprave `Code.gs` treba v Apps Scripte urobiť Nasadiť → Spravovať nasadenia → upraviť → Nová verzia.
+
+## Export do Excelu / CSV
+
+Prehľad → **📊 Export do Excelu**, alebo ⚙️ → **Export do Excelu / CSV** (`js/export.js`).
+
+- Obdobie: týždeň (pondelok–nedeľa), mesiac, rok alebo celkovo, so šípkami na posun dozadu.
+- **Excel (.xlsx)**: hárky *Transakcie* (filter, formát €, riadok Spolu), *Súhrn* (cash-flow, podiel kategórií), *Po mesiacoch*. Knižnica SheetJS sa načíta až pri prvom exporte.
+- **CSV**: UTF-8 s BOM, oddeľovač `;`, desatinná čiarka, takže ho slovenský Excel otvorí správne.
+- Stĺpce: Dátum, Deň, Obchodník, Kategória, Skupina, Typ, Suma, Výdavok, Príjem, Stav, Poznámka, Zdroj.
+- Súhrn počíta len schválené platby, bez presunov (rovnako ako Prehľad v appke).
+- Na iPhone sa súbor otvorí cez Zdieľať: Uložiť do Súborov, Mail, AirDrop…

@@ -1,8 +1,8 @@
 /* Service worker — offline app shell. Pri zmene súborov zvýš VERSION. */
-const VERSION = 'financie-v11';
+const VERSION = 'financie-v12';
 const SHELL = [
   './', './index.html', './manifest.json', './css/app.css',
-  './js/store.js', './js/parser.js', './js/ui.js',
+  './js/store.js', './js/parser.js', './js/export.js', './js/ui.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/apple-touch-icon.png',
 ];
 

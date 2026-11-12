@@ -351,6 +351,8 @@ textarea.input { min-height: 120px; resize: vertical; font-size: 15px; line-heig
 input[type="date"].input { display: block; }
 
 .segmented { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 12px; background: rgba(118, 118, 128, .24); margin-bottom: 12px; }
+.segmented--3 { grid-template-columns: repeat(3, 1fr); }
+.segmented--4 { grid-template-columns: repeat(4, 1fr); }
 .segmented button { min-height: 36px; border-radius: 9px; font-size: 15px; font-weight: 600; color: var(--text-2); transition: background .2s, color .2s; }
 .segmented button.is-active { background: rgba(255, 255, 255, .16); color: var(--text); }
 
