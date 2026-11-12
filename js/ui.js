@@ -1015,16 +1015,19 @@ function gmailStatusLine() {
   return `<p class="muted small" style="margin-top:14px">📬 Gmail · ${esc(gmailLastText())}</p>`;
 }
 
-/** Rozdelí odkaz "https://script.google.com/macros/s/…/exec?token=…" na adresu a kľúč. */
+/**
+ * Rozdelí odkaz "https://script.google.com/macros/s/…/exec?token=…" na adresu a kľúč.
+ * Kľúč môže chýbať, ak ho už poznáme (napr. z /dev odkazu vloženého predtým).
+ */
 function parseGmailLink(input) {
+  const raw = String(input).trim().match(/https:\/\/script\.google\S+/)?.[0];
   let u;
-  try { u = new URL(String(input).trim()); } catch { throw new Error('Toto nie je platný odkaz.'); }
+  try { u = new URL(raw); } catch { throw new Error('Toto nie je platný odkaz zo script.google.com.'); }
   if (!/^script\.google(usercontent)?\.com$/.test(u.hostname)) throw new Error('Odkaz musí byť zo script.google.com.');
-  if (u.pathname.endsWith('/dev')) throw new Error('Použi adresu nasadenia končiacu na /exec, nie /dev.');
-  const token = u.searchParams.get('token');
-  if (!token) throw new Error('V odkaze chýba ?token=… — skopíruj celý riadok z protokolu.');
+  const token = u.searchParams.get('token') || '';
   u.searchParams.delete('token');
-  return { gmailUrl: u.toString(), gmailToken: token };
+  u.hash = '';
+  return { url: u.toString(), token, isDev: u.pathname.endsWith('/dev'), isExec: u.pathname.endsWith('/exec') };
 }
 
 async function fetchGmail(cfg, after) {
@@ -1099,7 +1102,9 @@ function openGmailSheet() {
       </div>
 
       <label class="field" style="margin-top:14px">
-        <span class="field__label">Odkaz z Apps Scriptu (s ?token=…)</span>
+        <span class="field__label" id="gmail-label">${s.gmailPendingToken && !connected
+          ? '✓ Kľúč mám. Teraz vlož Web app URL (končí na /exec)'
+          : 'Odkaz z Apps Scriptu (s ?token=…)'}</span>
         <input class="input" id="gmail-link" type="url" autocomplete="off" autocapitalize="off" spellcheck="false"
           placeholder="https://script.google.com/macros/s/…/exec?token=…"
           value="${connected ? esc(`${s.gmailUrl}${s.gmailUrl.includes('?') ? '&' : '?'}token=${s.gmailToken}`) : ''}">
@@ -1121,16 +1126,31 @@ function openGmailSheet() {
           <li><b>Nasadiť → Nové nasadenie</b> → ozubené koliesko → <b>Webová aplikácia</b>.<br>
             Spustiť ako: <b>Ja</b> · Kto má prístup: <b>Ktokoľvek</b> → <b>Nasadiť</b>.</li>
           <li>Povoľ prístup ku Gmailu. Google ukáže varovanie „neoverená aplikácia“, lebo skript je tvoj vlastný: <b>Rozšírené → Prejsť na projekt</b>.</li>
-          <li>Hore vyber funkciu <b>setup</b> → <b>Spustiť</b>. V <b>Protokole vykonávania</b> sa objaví riadok <i>ODKAZ PRE APPKU</i>.</li>
-          <li>Ten odkaz vlož sem vyššie a ťukni na <b>Pripojiť</b>.</li>
+          <li>Hore vyber funkciu <b>setup</b> → <b>Spustiť</b>. V <b>Protokole vykonávania</b> sa objaví riadok <i>ODKAZ PRE APPKU</i>. Vlož ho sem vyššie → <b>Pripojiť</b>.</li>
+          <li>Ak odkaz končí na <code>/dev</code>, appka si z neho vezme kľúč. Potom v Apps Scripte otvor <b>Deploy → Manage deployments</b>, skopíruj <b>Web app URL</b> (končí na <code>/exec</code>) a vlož ju sem tiež.</li>
         </ol>
         <div class="note"><b>Bezpečnosť:</b> skript Gmail iba číta, a len maily od banky (ČSOB <code>info@servis.csob.sk</code>). Odkaz s kľúčom nikomu neposielaj. Ak unikne, spusti v skripte <code>resetToken</code>.</div>
       </div>`,
     onMount(sheet, close) {
       $('#gmail-save', sheet).addEventListener('click', async () => {
-        let cfg;
-        try { cfg = parseGmailLink($('#gmail-link', sheet).value); }
+        const input = $('#gmail-link', sheet);
+        let link;
+        try { link = parseGmailLink(input.value); }
         catch (e) { toast(e.message); return; }
+        const token = link.token || store.state.settings.gmailPendingToken || store.state.settings.gmailToken;
+        if (link.isDev || !link.isExec) {
+          // /dev odkaz funguje len v editore — kľúč si ale zapamätáme
+          if (link.token) store.setSetting('gmailPendingToken', link.token);
+          input.value = '';
+          input.placeholder = 'https://script.google.com/macros/s/…/exec';
+          $('#gmail-label', sheet).textContent = token
+            ? '✓ Kľúč mám. Teraz vlož Web app URL (končí na /exec)'
+            : 'Vlož Web app URL (končí na /exec) aj s ?token=…';
+          toast('Tento odkaz končí na /dev. V Apps Scripte: Deploy → Manage deployments → skopíruj Web app URL.');
+          return;
+        }
+        if (!token) { toast('Chýba kľúč. Vlož celý riadok z protokolu (s ?token=…).'); return; }
+        const cfg = { gmailUrl: link.url, gmailToken: token, gmailPendingToken: '' };
         const changed = cfg.gmailUrl !== s.gmailUrl || cfg.gmailToken !== s.gmailToken;
         store.setSettings({ ...cfg, ...(changed ? { gmailLastSync: 0, gmailError: '' } : {}) });
         close();

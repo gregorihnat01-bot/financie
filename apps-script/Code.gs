@@ -36,9 +36,11 @@ function setup() {
   const test = GmailApp.search(buildQuery(0), 0, 5).length;
   const url = ScriptApp.getService().getUrl();
   Logger.log('Nájdených vlákien od banky za posledných %s dní (ukážka): %s', FIRST_SYNC_DAYS, test);
-  if (url) {
+  if (url && /\/exec$/.test(url)) {
     Logger.log('ODKAZ PRE APPKU (skopíruj celý riadok):\n%s?token=%s', url, token);
-    Logger.log('Ak adresa vyššie končí na /dev, použi radšej adresu z okna Nasadiť → Spravovať nasadenia (končí /exec) a pridaj za ňu ?token=%s', token);
+  } else if (url) {
+    Logger.log('ODKAZ PRE APPKU – časť 1 (kľúč), vlož do appky:\n%s?token=%s', url, token);
+    Logger.log('Časť 2: Deploy → Manage deployments → skopíruj „Web app URL“ (končí /exec) a vlož ju do appky tiež.');
   } else {
     Logger.log('Najprv nasaď skript ako Webovú aplikáciu (krok 2), potom spusti setup znova.');
     Logger.log('TOKEN: %s', token);
