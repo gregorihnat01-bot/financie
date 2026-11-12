@@ -54,19 +54,21 @@
       if (seen || /[?&](add|import)=/.test(location.search)) { done(); return; }
 
       var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-      var minHold = reduce ? 650 : 1500, start = Date.now(), left = false;
+      // Odchod začne hneď, ako dobehne posledný pohyb (bez mŕtvej pauzy)
+      var minHold = reduce ? 400 : 780, start = Date.now(), left = false;
       function leave() {
         if (left) return;
         left = true;
         el.classList.add('is-leaving');
         body.classList.add('is-revealing');
         body.classList.remove('is-launching');
-        setTimeout(done, reduce ? 350 : 850);
+        setTimeout(done, reduce ? 300 : 520);
       }
-      // Odíď až keď je dashboard vykreslený (load) a animácia dobehla
+      // Dashboard je vykreslený po DOMContentLoaded (moduly už dobehli). Nečakáme na 'load',
+      // ten by čakal aj na požiadavky do Gmailu a úvodná obrazovka by zbytočne stála.
       function whenReady() { setTimeout(leave, Math.max(0, minHold - (Date.now() - start))); }
-      if (document.readyState === 'complete') whenReady();
-      else window.addEventListener('load', whenReady);
+      if (document.readyState !== 'loading') whenReady();
+      else document.addEventListener('DOMContentLoaded', whenReady);
       setTimeout(done, 5000); // poistka
     })();
   </script>

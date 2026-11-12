@@ -405,14 +405,14 @@ input[type="date"].input { display: block; }
   display: grid; place-items: center;
   padding: var(--safe-t) 16px var(--safe-b);
   background: var(--bg);
-  transition: opacity .6s cubic-bezier(.4, 0, .2, 1);
+  transition: opacity .42s cubic-bezier(.4, 0, .2, 1);
 }
 .splash__stage {
   position: relative;
   display: flex; flex-direction: column; align-items: center;
   margin-bottom: 6vh; /* opticky stred */
-  animation: splashFade .5s cubic-bezier(.4, 0, .2, 1) both;
-  transition: transform .7s var(--ease), filter .7s var(--ease);
+  animation: splashFade .3s cubic-bezier(.4, 0, .2, 1) both;
+  transition: transform .5s var(--ease), filter .5s var(--ease);
 }
 .splash__mark {
   width: 96px; height: 96px; border-radius: 24px;
@@ -420,19 +420,19 @@ input[type="date"].input { display: block; }
   background: var(--glass);
   border: 1px solid var(--hairline);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 18px 40px rgba(0, 0, 0, .6);
-  animation: splashMark .9s cubic-bezier(.16, 1, .3, 1) .1s both;
+  animation: splashMark .6s cubic-bezier(.16, 1, .3, 1) .04s both;
 }
 .splash__mark svg { overflow: visible; }
-.splash__bar { transform-box: fill-box; transform-origin: 50% 100%; animation: splashBar .75s cubic-bezier(.16, 1, .3, 1) both; }
-.splash__bar--1 { animation-delay: .3s; }
-.splash__bar--2 { animation-delay: .38s; }
-.splash__bar--3 { animation-delay: .46s; }
-.splash__arrow { animation: splashArrow .6s cubic-bezier(.16, 1, .3, 1) .62s both; }
+.splash__bar { transform-box: fill-box; transform-origin: 50% 100%; animation: splashBar .5s cubic-bezier(.16, 1, .3, 1) both; }
+.splash__bar--1 { animation-delay: .14s; }
+.splash__bar--2 { animation-delay: .19s; }
+.splash__bar--3 { animation-delay: .24s; }
+.splash__arrow { animation: splashArrow .42s cubic-bezier(.16, 1, .3, 1) .34s both; }
 .splash__name {
   margin-top: 22px;
   font-size: 34px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1;
   color: var(--text);
-  animation: splashName .8s cubic-bezier(.16, 1, .3, 1) .48s both;
+  animation: splashName .55s cubic-bezier(.16, 1, .3, 1) .22s both;
 }
 .splash__glow {
   position: absolute; left: 50%; bottom: -34px; z-index: -1;
@@ -441,7 +441,7 @@ input[type="date"].input { display: block; }
   background: radial-gradient(closest-side, rgba(48, 209, 88, .26), rgba(48, 209, 88, 0));
   filter: blur(14px);
   pointer-events: none;
-  animation: splashGlow 1.2s cubic-bezier(.4, 0, .2, 1) .7s both;
+  animation: splashGlow .7s cubic-bezier(.4, 0, .2, 1) .32s both;
 }
 
 @keyframes splashFade  { from { opacity: 0; } }
@@ -461,7 +461,7 @@ body.is-launching .tabbar { opacity: 0; transform: translateY(10px); }
 body.is-launching { overflow: hidden; }
 body.is-revealing .topbar,
 body.is-revealing .views,
-body.is-revealing .tabbar { transition: opacity .6s var(--ease) .08s, transform .8s var(--ease) .08s; }
+body.is-revealing .tabbar { transition: opacity .42s var(--ease), transform .55s var(--ease); }
 body.is-revealing .views { transform-origin: 50% 20%; }
 
 /* Obmedziť pohyb: bez posunov, zväčšení a rozostrení — len krátke prelínanie */
