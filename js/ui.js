@@ -54,7 +54,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '10';
+const APP_VERSION = '11';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 

@@ -347,6 +347,8 @@ function decideSign(value, explicitSign, context) {
   const c = norm(context);
   const inc = INCOME_WORDS.test(c), exp = EXPENSE_WORDS.test(c);
   if (inc && !exp) return Math.abs(value);
+  // ČSOB "Pohyb na účte": odchádzajúce majú mínus, suma bez znamienka = prichádzajúca platba
+  if (/pohyb na ucte/.test(c) && !/transakcia kartou/.test(c)) return Math.abs(value);
   return -Math.abs(value); // bankové notifikácie sú najčastejšie výdavky
 }
 
