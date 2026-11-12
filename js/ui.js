@@ -54,7 +54,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '6';
+const APP_VERSION = '7';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -1047,7 +1047,8 @@ async function fetchGmail(cfg, after) {
     return data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('Gmail skript neodpovedá. Skús to o chvíľu.');
-    if (e instanceof TypeError) throw new Error(navigator.onLine ? 'Nepodarilo sa spojiť so skriptom.' : 'Si offline.');
+    // Google pri chybe vráti HTML stránku bez CORS hlavičiek → prehliadač hlási len TypeError
+    if (e instanceof TypeError) throw new Error(navigator.onLine ? 'Skript nevrátil dáta. Otvor „Otestovať v Safari“ v nastaveniach Gmailu.' : 'Si offline.');
     throw e;
   } finally {
     clearTimeout(timer);
@@ -1116,6 +1117,17 @@ function openGmailSheet() {
         <div class="row" style="margin-top:10px">
           <button class="btn" id="gmail-now">↻ Skontrolovať teraz</button>
           <button class="btn btn--danger" id="gmail-off">Odpojiť</button>
+        </div>
+        <a class="btn btn--block" style="margin-top:10px;text-decoration:none" target="_blank" rel="noopener"
+           href="${esc(`${s.gmailUrl}${s.gmailUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(s.gmailToken)}&after=${Math.floor(Date.now() / 1000) - 86400}`)}">🔍 Otestovať v Safari</a>
+        <div class="glass guide small" style="margin-top:10px">
+          <p><b>Čo má Safari ukázať:</b> text začínajúci <code>{"ok":true</code>, vtedy je všetko v poriadku.</p>
+          <ul style="padding-left:18px;margin-top:6px">
+            <li><b>Prihlásenie do Google / „nemáte prístup“:</b> nasadenie nemá prístup <b>Ktokoľvek</b> (Anyone).</li>
+            <li><b>„Script function not found: doGet“:</b> nasadil si verziu bez kódu. Daj Deploy → Manage deployments → ✏️ → Version: <b>New version</b> → Deploy.</li>
+            <li><b>„Authorization is required“ / chyba Gmailu:</b> v editore spusti funkciu <b>setup</b> a povoľ prístup.</li>
+            <li><b>{"ok":false,"error":"unauthorized"}:</b> zlý kľúč, vlož odkaz z protokolu znova.</li>
+          </ul>
         </div>` : ''}
 
       <div class="section-title">Nastavenie (raz, cca 5 minút — najľahšie na počítači)</div>
