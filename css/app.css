@@ -211,6 +211,7 @@ svg { display: block; }
   background: color-mix(in srgb, var(--c, #8e8e93) 20%, transparent);
 }
 .list-row__main { flex: 1; min-width: 0; }
+.list-row__title, .list-row__sub { display: block; }
 .list-row__title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list-row__sub { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list-row__end { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
