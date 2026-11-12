@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Financie · Gmail skript</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #000; color: #fff; font: 17px/1.45 -apple-system, system-ui, sans-serif;
+         padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left)); }
+  h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.02em; }
+  p { color: rgba(235,235,245,.62); margin: 0 0 18px; }
+  button { width: 100%; min-height: 60px; border: 0; border-radius: 18px; font: 600 18px/1 inherit; font-family: inherit;
+           background: #30d158; color: #000; }
+  button:active { transform: scale(.98); }
+  button:disabled { opacity: .4; }
+  #status { text-align: center; margin-top: 14px; min-height: 24px; color: #30d158; font-weight: 600; }
+  textarea { width: 100%; box-sizing: border-box; height: 40vh; margin-top: 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,.1);
+             background: rgba(255,255,255,.05); color: rgba(235,235,245,.8); font: 12px/1.4 ui-monospace, Menlo, monospace; padding: 12px; }
+</style>
+</head>
+<body>
+  <h1>Gmail skript</h1>
+  <p>Ťukni na tlačidlo, vráť sa do Apps Scriptu a kód vlož do súboru <b>Kód.gs</b> namiesto toho, čo tam je.</p>
+  <button id="copy" disabled>Načítavam…</button>
+  <div id="status"></div>
+  <textarea id="code" readonly></textarea>
+<script>
+  const btn = document.getElementById('copy'), area = document.getElementById('code'), status = document.getElementById('status');
+  fetch('Code.gs', { cache: 'no-store' }).then(r => r.text()).then(t => {
+    area.value = t; btn.disabled = false; btn.textContent = '📋 Kopírovať skript';
+  }).catch(() => { btn.textContent = 'Nepodarilo sa načítať'; });
+  btn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(area.value); }
+    catch { area.focus(); area.select(); document.execCommand('copy'); }
+    status.textContent = '✓ Skopírované — teraz ho vlož v Apps Scripte';
+  });
+</script>
+</body>
+</html>
