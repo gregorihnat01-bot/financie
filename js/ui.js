@@ -7,6 +7,7 @@
 
 import { store, CATEGORIES, CAT, monthStats, shiftMonth, merchantKey, todayISO } from './store.js';
 import { parseFile, parseText, extractTransactions } from './parser.js';
+import { jsonp, syncNow, syncEnabled, scheduleSync } from './sync.js';
 
 /* =========================================================================
  *  Helpers
@@ -54,7 +55,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '11';
+const APP_VERSION = '12';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -694,6 +695,11 @@ function openSettings() {
         ${row('install', '📲', 'Pridať na plochu', 'Appka bez lišty prehliadača')}
       </div>
 
+      <div class="section-title">Zariadenia</div>
+      <div class="glass list settings-group">
+        ${row('sync', '🔄', 'Synchronizácia PC ↔ iPhone', syncEnabled() ? `Zapnutá · ${esc(syncLastText())}` : 'Rovnaké dáta na všetkých zariadeniach')}
+      </div>
+
       <div class="section-title">Pravidlá</div>
       <div class="glass list settings-group">
         ${row('rules', '🧠', 'Naučené pravidlá', plural(rules, 'pravidlo', 'pravidlá', 'pravidiel'))}
@@ -703,16 +709,17 @@ function openSettings() {
       <div class="glass list settings-group">
         ${row('export', '💾', 'Exportovať zálohu (JSON)')}
         ${row('restore', '♻️', 'Obnoviť zo zálohy')}
-        ${row('demo', '🧪', 'Načítať ukážkové dáta')}
-        ${row('wipe', '🗑️', '<span style="color:var(--red)">Vymazať všetky dáta</span>')}
+        ${syncEnabled() ? '' : row('demo', '🧪', 'Načítať ukážkové dáta')}
+        ${row('wipe', '🗑️', '<span style="color:var(--red)">Vymazať dáta v tomto zariadení</span>', syncEnabled() ? 'Pri synchronizácii sa znova stiahnu z Google' : '')}
       </div>
-      <p class="muted small" style="margin:16px 4px 0;text-align:center">Dáta sú uložené len v tomto zariadení (LocalStorage).<br>Nikam sa neposielajú.<br>Verzia ${APP_VERSION}</p>`,
+      <p class="muted small" style="margin:16px 4px 0;text-align:center">${syncEnabled() ? 'Dáta sú v tomto zariadení a v tvojej Google Tabuľke.' : 'Dáta sú uložené len v tomto zariadení (LocalStorage).<br>Nikam sa neposielajú.'}<br>Verzia ${APP_VERSION}</p>`,
     onMount(sheet, close) {
       sheet.addEventListener('click', e => {
         const b = e.target.closest('[data-action]');
         if (!b) return;
         const a = b.dataset.action;
         if (a === 'gmail') openGmailSheet();
+        else if (a === 'sync') openSyncSheet();
         else if (a === 'import') { close(); $('#file-input').click(); }
         else if (a === 'paste') { close(); pasteFromClipboard(); }
         else if (a === 'paste-manual') openPasteSheet();
@@ -727,7 +734,7 @@ function openSettings() {
           if (b.dataset.armed) { store.reset(); close(); toast('Všetko vymazané'); return; }
           b.dataset.armed = '1';
           $('.list-row__title', b).innerHTML = '<span style="color:var(--red)">Ťukni znova — vymaže sa všetko</span>';
-          setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; $('.list-row__title', b).innerHTML = '<span style="color:var(--red)">Vymazať všetky dáta</span>'; } }, 4000);
+          setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; $('.list-row__title', b).innerHTML = '<span style="color:var(--red)">Vymazať dáta v tomto zariadení</span>'; } }, 4000);
         }
       });
     },
@@ -1014,7 +1021,68 @@ const gmailLastText = () => store.state.settings.gmailError
 
 function gmailStatusLine() {
   if (!gmailConnected()) return '';
-  return `<p class="muted small" style="margin-top:14px">📬 Gmail · ${esc(gmailLastText())} · v${APP_VERSION}</p>`;
+  return `<p class="muted small" style="margin-top:14px">📬 Gmail · ${esc(gmailLastText())}${syncEnabled() ? `<br>🔄 Sync · ${esc(syncLastText())}` : ''} · v${APP_VERSION}</p>`;
+}
+
+const syncLastText = () => store.state.settings.syncError
+  ? `⚠️ ${store.state.settings.syncError}`
+  : `synchronizované ${relTime(store.state.settings.syncLastOk)}`;
+
+function openSyncSheet() {
+  const s = store.state.settings;
+  const on = syncEnabled();
+  openSheet({
+    title: 'Synchronizácia',
+    html: `
+      <div class="glass guide">
+        ${!gmailConnected()
+          ? `<p>Najprv pripoj <b>Automatický import z Gmailu</b>. Synchronizácia používa ten istý Google skript.</p>`
+          : on
+            ? `<p><b>✅ Zapnutá.</b> Zmeny sa posielajú hneď a zo zariadení sa sťahujú pri každom otvorení appky.</p>
+               <p class="muted small" style="margin-top:6px">${esc(syncLastText())}</p>`
+            : `<p>Transakcie, kategórie a naučené pravidlá budú rovnaké na PC aj iPhone. Ukladajú sa do Google Tabuľky <b>„Financie – dáta“</b> vo tvojom Google Drive, takže máš aj automatickú zálohu.</p>`}
+      </div>
+      ${gmailConnected() ? (on ? `
+        <button class="btn btn--primary btn--block" style="margin-top:14px" id="sync-now">↻ Synchronizovať teraz</button>
+        ${s.syncSheetUrl ? `<a class="btn btn--block" style="margin-top:10px;text-decoration:none" target="_blank" rel="noopener" href="${esc(s.syncSheetUrl)}">📊 Otvoriť Google Tabuľku</a>` : ''}
+        <button class="btn btn--danger btn--block" style="margin-top:10px" id="sync-off">Vypnúť v tomto zariadení</button>`
+      : `
+        <button class="btn btn--primary btn--block" style="margin-top:14px" id="sync-on">Zapnúť synchronizáciu</button>
+        <div class="section-title">Pred prvým zapnutím (raz, na PC)</div>
+        <div class="glass guide">
+          <ol>
+            <li>Otvor <b>Code.gs</b> na GitHube (odkaz nižšie) → <b>Copy raw file</b>.</li>
+            <li>V Apps Scripte: <b>Ctrl+A</b>, <b>Ctrl+V</b>, <b>Ctrl+S</b>.</li>
+            <li>Vyber funkciu <b>setup</b> → <b>Run</b> → povoľ prístup (nové oprávnenie: Google Tabuľky).</li>
+            <li><b>Deploy → Manage deployments → ✏️ → Version: New version → Deploy</b>.</li>
+          </ol>
+          <code class="code">${esc(GMAIL_SCRIPT_URL)}</code>
+          <p class="small muted">Odkaz v appke ostáva rovnaký. Zapni synchronizáciu na každom zariadení (PC aj iPhone).</p>
+        </div>`) : ''}`,
+    onMount(sheet, close) {
+      $('#sync-on', sheet)?.addEventListener('click', async () => {
+        store.setSettings({ syncEnabled: true, syncRev: 0, syncLastPushAt: 0, syncError: '' });
+        close();
+        toast('Synchronizujem…');
+        try {
+          const r = await syncNow({ manual: true });
+          toast(`✅ Synchronizácia zapnutá${r ? ` · odoslané ${r.pushed}, prijaté ${r.applied}` : ''}`);
+        } catch (e) { toast(e.message); }
+      });
+      $('#sync-now', sheet)?.addEventListener('click', async () => {
+        close();
+        try {
+          const r = await syncNow({ manual: true });
+          toast(r && (r.pushed || r.applied) ? `🔄 Odoslané ${r.pushed}, prijaté ${r.applied}` : '🔄 Všetko je aktuálne');
+        } catch (e) { toast(e.message); }
+      });
+      $('#sync-off', sheet)?.addEventListener('click', () => {
+        store.setSettings({ syncEnabled: false, syncError: '' });
+        close();
+        toast('Synchronizácia vypnutá v tomto zariadení');
+      });
+    },
+  });
 }
 
 /**
@@ -1030,32 +1098,6 @@ function parseGmailLink(input) {
   u.searchParams.delete('token');
   u.hash = '';
   return { url: u.toString(), token, isDev: u.pathname.endsWith('/dev'), isExec: u.pathname.endsWith('/exec') };
-}
-
-/**
- * JSONP: odpoveď sa načíta ako <script>, takže na ňu neplatia CORS pravidlá.
- * Ak skript ešte nepozná ?callback= (stará verzia), zlyhá hneď a použije sa fetch.
- */
-function jsonp(url, timeoutMs = 25000) {
-  return new Promise((resolve, reject) => {
-    const name = `__financieCb${Date.now()}${Math.floor(Math.random() * 1e6)}`;
-    const el = document.createElement('script');
-    let done = false;
-    const finish = (fn, v) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      delete window[name];
-      el.remove();
-      fn(v);
-    };
-    const timer = setTimeout(() => finish(reject, new Error('timeout')), timeoutMs);
-    window[name] = data => finish(resolve, data);
-    el.onerror = () => finish(reject, new Error('jsonp-error'));
-    el.onload = () => setTimeout(() => finish(reject, new Error('jsonp-no-callback')), 50);
-    el.src = `${url}&callback=${name}`;
-    document.head.appendChild(el);
-  });
 }
 
 async function fetchGmail(cfg, after) {
@@ -1125,9 +1167,10 @@ async function syncGmail({ manual = false } = {}) {
     for (const item of data.items || []) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
-      parsed.push(...extractTransactions(`${item.subject}\n${item.text}`, {
+      // ID odvodené od ID mailu → na PC aj iPhone vznikne rovnaká platba (žiadne duplicity pri synchronizácii)
+      extractTransactions(`${item.subject}\n${item.text}`, {
         source: 'gmail', subject: item.subject, fallbackDate: String(item.date).slice(0, 10),
-      }));
+      }).forEach((t, i) => parsed.push({ ...t, id: `gm-${item.id}${i ? `-${i}` : ''}` }));
     }
     const { added } = parsed.length ? store.addTransactions(parsed) : { added: 0 };
     store.setSettings({ gmailLastSync: data.now, gmailSeen: [...seen].slice(-500), gmailLastOk: Date.now(), gmailError: '' });
@@ -1350,15 +1393,25 @@ store.subscribe((_, reason) => {
   render();
   if (store.error) toast(store.error);
   if (reason === 'sync') toast('Dáta aktualizované');
+  // Lokálna zmena → odošli ju do ostatných zariadení
+  if (['add', 'approve', 'update', 'snooze', 'remove', 'rules', 'reset'].includes(reason)) scheduleSync();
 });
 
 bindEvents();
 setTab('inbox');
 consumeLaunchURL();
 
-// Automatický import z Gmailu: pri štarte a pri každom návrate do appky
-syncGmail();
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncGmail(); });
+// Pri štarte a pri návrate do appky: najprv zmeny z ostatných zariadení, potom nové maily z banky
+// (poradie bráni duplicitám — platba z Gmailu, ktorú už pridalo iné zariadenie, sa preskočí)
+let lastRefresh = 0;
+async function refresh() {
+  if (Date.now() - lastRefresh < 30_000) return;
+  lastRefresh = Date.now();
+  await syncNow();
+  await syncGmail();
+}
+refresh();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {}));

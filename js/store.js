@@ -81,7 +81,9 @@ function round2(n) {
 
 /* ---------- State ---------- */
 function emptyState() {
-  return { version: SCHEMA_VERSION, transactions: [], rules: {}, settings: {} };
+  // deleted: id → čas zmazania (aby sa zmazanie prenieslo aj do iných zariadení)
+  // rulesMeta: kľúč pravidla → čas poslednej zmeny (pravidlo bez kľúča v rules = zmazané)
+  return { version: SCHEMA_VERSION, transactions: [], rules: {}, rulesMeta: {}, deleted: {}, settings: {} };
 }
 
 function sanitizeTx(t) {
@@ -100,6 +102,7 @@ function sanitizeTx(t) {
     status: t.status === 'approved' && category ? 'approved' : 'pending',
     source: String(t.source || 'manual'),
     createdAt: Number(t.createdAt) || Date.now(),
+    updatedAt: Number(t.updatedAt) || Number(t.createdAt) || Date.now(),
     snoozedAt: Number(t.snoozedAt) || 0,
   };
 }
@@ -110,6 +113,13 @@ function sanitizeState(raw) {
   if (Array.isArray(raw.transactions)) s.transactions = raw.transactions.map(sanitizeTx).filter(Boolean);
   if (raw.rules && typeof raw.rules === 'object') {
     for (const [k, v] of Object.entries(raw.rules)) if (CAT[v]) s.rules[k] = v;
+  }
+  if (raw.rulesMeta && typeof raw.rulesMeta === 'object') {
+    for (const [k, v] of Object.entries(raw.rulesMeta)) if (Number(v) > 0) s.rulesMeta[k] = Number(v);
+  }
+  for (const k of Object.keys(s.rules)) if (!s.rulesMeta[k]) s.rulesMeta[k] = 1; // staré pravidlá
+  if (raw.deleted && typeof raw.deleted === 'object') {
+    for (const [k, v] of Object.entries(raw.deleted)) if (Number(v) > 0) s.deleted[k] = Number(v);
   }
   if (raw.settings && typeof raw.settings === 'object') s.settings = { ...raw.settings };
   return s;
@@ -166,6 +176,17 @@ window.addEventListener('storage', e => {
   }
 });
 
+/** Každá zmena pravidla si pamätá čas → synchronizácia vie, ktorá zmena je novšia. */
+function writeRule(key, category) {
+  if (category && CAT[category]) state.rules[key] = category;
+  else delete state.rules[key];
+  state.rulesMeta[key] = Date.now();
+}
+
+function touch(t) {
+  t.updatedAt = Math.max(Date.now(), (t.updatedAt || 0) + 1);
+}
+
 /* ---------- Verejné API: čítanie ---------- */
 export const store = {
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -212,8 +233,11 @@ export const store = {
     const items = [];
     let skipped = 0;
     for (const raw of list) {
-      const t = sanitizeTx({ ...raw, id: uid(), createdAt: Date.now() });
+      // Import z Gmailu posiela stabilné ID (gm-…) → rovnaká platba má na PC aj iPhone rovnaké ID
+      const now = Date.now();
+      const t = sanitizeTx({ ...raw, id: raw.id || uid(), createdAt: now, updatedAt: now });
       if (!t) { skipped++; continue; }
+      if (state.deleted[t.id] || state.transactions.some(x => x.id === t.id)) { skipped++; continue; }
       if (dedupe && existing.has(fp(t))) { skipped++; continue; }
       existing.add(fp(t));
       items.push(t);
@@ -239,7 +263,8 @@ export const store = {
     t.category = category;
     t.status = 'approved';
     t.snoozedAt = 0;
-    if (learn) state.rules[merchantKey(t.merchant)] = category;
+    touch(t);
+    if (learn) writeRule(merchantKey(t.merchant), category);
     commit('approve');
     return true;
   },
@@ -253,7 +278,8 @@ export const store = {
       t.category = category;
       t.status = 'approved';
       t.snoozedAt = 0;
-      state.rules[merchantKey(t.merchant)] = category;
+      touch(t);
+      writeRule(merchantKey(t.merchant), category);
       n++;
     }
     if (n) commit('approve');
@@ -272,7 +298,8 @@ export const store = {
     const next = sanitizeTx({ ...t, ...patch });
     if (!next) return false;
     Object.assign(t, next);
-    if (patch.category && t.status === 'approved') state.rules[merchantKey(t.merchant)] = t.category;
+    touch(t);
+    if (patch.category && t.status === 'approved') writeRule(merchantKey(t.merchant), t.category);
     commit('update');
     return true;
   },
@@ -281,6 +308,7 @@ export const store = {
     const t = state.transactions.find(x => x.id === id);
     if (!t) return;
     t.snoozedAt = Date.now();
+    touch(t);
     commit('snooze');
   },
 
@@ -288,25 +316,76 @@ export const store = {
     const i = state.transactions.findIndex(x => x.id === id);
     if (i < 0) return null;
     const [removed] = state.transactions.splice(i, 1);
+    state.deleted[id] = Date.now();
     commit('remove');
     return removed;
   },
 
   restore(tx) {
+    delete state.deleted[tx.id];
+    touch(tx);
     state.transactions.push(tx);
     commit('add');
   },
 
   deleteRule(key) {
-    delete state.rules[key];
+    writeRule(key, null);
     commit('rules');
   },
 
   /** Nastaví (alebo s `null` zmaže) pravidlo — používa sa pri "Späť". */
   setRule(key, category) {
-    if (category && CAT[category]) state.rules[key] = category;
-    else delete state.rules[key];
+    writeRule(key, category);
     commit('rules');
+  },
+
+  /* ---------- Synchronizácia ---------- */
+
+  /** Zmeny od času `ts` (ukážkové dáta sa neposielajú). */
+  changesSince(ts) {
+    const tx = state.transactions.filter(t => t.updatedAt > ts && t.source !== 'demo');
+    const del = Object.entries(state.deleted).filter(([, u]) => u > ts).map(([id, u]) => ({ id, deleted: true, updatedAt: u }));
+    const rules = Object.entries(state.rulesMeta).filter(([, u]) => u > ts)
+      .map(([key, u]) => ({ key, category: state.rules[key] || null, deleted: !state.rules[key], updatedAt: u }));
+    const all = [...tx, ...del, ...rules].map(x => x.updatedAt);
+    return { transactions: [...tx, ...del], rules, count: all.length, maxTs: Math.max(ts, ...all) };
+  },
+
+  /** Zlúči zmeny z iného zariadenia. Novšia zmena (updatedAt) vyhráva. */
+  applyRemote({ transactions = [], rules = [] } = {}) {
+    let n = 0;
+    const byId = new Map(state.transactions.map(t => [t.id, t]));
+    for (const r of transactions) {
+      if (!r || !r.id) continue;
+      const u = Number(r.updatedAt) || 0;
+      const local = byId.get(r.id);
+      if ((state.deleted[r.id] || 0) >= u) continue;
+      if (local && local.updatedAt >= u) continue;
+      if (r.deleted) {
+        state.deleted[r.id] = u;
+        if (local) { state.transactions = state.transactions.filter(t => t.id !== r.id); byId.delete(r.id); }
+        n++;
+        continue;
+      }
+      const t = sanitizeTx(r);
+      if (!t) continue;
+      t.updatedAt = u;
+      if (local) Object.assign(local, t);
+      else { state.transactions.push(t); byId.set(t.id, t); }
+      delete state.deleted[r.id];
+      n++;
+    }
+    for (const r of rules) {
+      if (!r || !r.key) continue;
+      const u = Number(r.updatedAt) || 0;
+      if ((state.rulesMeta[r.key] || 0) >= u) continue;
+      state.rulesMeta[r.key] = u;
+      if (r.deleted || !CAT[r.category]) delete state.rules[r.key];
+      else state.rules[r.key] = r.category;
+      n++;
+    }
+    if (n) commit('remote');
+    return n;
   },
 
   setSetting(key, value) {
@@ -327,13 +406,22 @@ export const store = {
   importJSON(text) {
     const parsed = JSON.parse(text); // nech vyhodí chybu, UI ju zobrazí
     if (!parsed || !Array.isArray(parsed.transactions)) throw new Error('Súbor neobsahuje zálohu Financií.');
+    const settings = state.settings; // nastavenia zariadenia (Gmail, synchronizácia) ostávajú
     state = sanitizeState(parsed);
+    state.settings = { ...settings, syncLastPushAt: 0 };
+    // Obnovenie zálohy je zámer → zmeny zo zálohy majú prednosť aj pri synchronizácii
+    const now = Date.now();
+    for (const t of state.transactions) t.updatedAt = now;
+    for (const k of Object.keys(state.rulesMeta)) state.rulesMeta[k] = now;
     commit('reset');
     return state.transactions.length;
   },
 
+  /** Vymaže dáta v tomto zariadení. Nastavenia ostávajú; pri synchronizácii sa dáta znova stiahnu. */
   reset() {
+    const { gmailUrl, gmailToken, gmailSeen, gmailLastSync, gmailLastOk, syncEnabled, deviceId } = state.settings;
     state = emptyState();
+    state.settings = { gmailUrl, gmailToken, gmailSeen, gmailLastSync, gmailLastOk, syncEnabled, deviceId, syncRev: 0, syncLastPushAt: 0 };
     commit('reset');
   },
 };

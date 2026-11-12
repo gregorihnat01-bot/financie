@@ -1,18 +1,24 @@
 /**
- * Financie — automatický import platieb z Gmailu.
+ * Financie — Google Apps Script pre appku Financie.
  *
- * Beží vo TVOJOM Google účte. Appka Financie si pri otvorení vypýta nové
- * notifikácie banky, rozpozná v nich platby a zaradí ich do inboxu na schválenie.
+ * 1) Automatický import platieb z Gmailu
+ *    Appka si pri otvorení vypýta nové notifikácie banky a zaradí ich do inboxu.
+ *    Gmail sa iba ČÍTA (nič sa nemaže, neoznačuje ani neposiela) a len maily od SENDERS.
  *
- * Skript Gmail iba ČÍTA (nič nemaže, neoznačuje, neposiela) a vracia len maily
- * od odosielateľov v SENDERS. Prístup je chránený tajným kľúčom (TOKEN).
+ * 2) Synchronizácia medzi zariadeniami (PC ↔ iPhone)
+ *    Transakcie a naučené pravidlá sa ukladajú do Google Tabuľky „Financie – dáta“
+ *    vo tvojom Google Drive. Funguje aj ako záloha; tabuľku si môžeš kedykoľvek otvoriť.
  *
- * Nastavenie (raz, cca 5 minút):
+ * Prístup je chránený tajným kľúčom (TOKEN).
+ *
+ * Nastavenie (raz):
  *  1. script.google.com → Nový projekt → vlož tento súbor namiesto Code.gs → Uložiť.
- *  2. Nasadiť → Nové nasadenie → ozubené koliesko → Webová aplikácia
- *       Spustiť ako: Ja   ·   Kto má prístup: Ktokoľvek   → Nasadiť → povoľ prístup.
- *  3. V lište hore vyber funkciu `setup` → Spustiť. V protokole sa zobrazí odkaz pre appku.
- *  4. V appke: ⚙️ → Automatický import z Gmailu → vlož odkaz → Uložiť.
+ *  2. Deploy → New deployment → ⚙️ Web app · Execute as: Me · Who has access: Anyone → Deploy.
+ *  3. Vyber funkciu `setup` → Run → povoľ prístup. V protokole sa zobrazí kľúč.
+ *  4. V appke: ⚙️ → Automatický import z Gmailu → vlož odkaz /exec?token=… → Pripojiť.
+ *
+ * Aktualizácia skriptu: vlož novú verziu → Uložiť → spusti `setup` (povolí nové oprávnenia)
+ * → Deploy → Manage deployments → ✏️ → Version: New version → Deploy.
  */
 
 const SENDERS = [
@@ -23,8 +29,13 @@ const SENDERS = [
 const SUBJECT_FILTER = /(transakci|pohyb na |platb|kredit|debet)/i; // ignoruje marketing od banky
 const MAX_THREADS = 100;
 const FIRST_SYNC_DAYS = 31;
+const SCRIPT_VERSION = 2;
 
-/* ---------- Spusti raz ručne: vytvorí tajný kľúč a vypíše odkaz pre appku ---------- */
+/* =========================================================================
+ *  Nastavenie
+ * ========================================================================= */
+
+/** Spusti ručne: vytvorí kľúč a tabuľku, overí oprávnenia, vypíše odkaz pre appku. */
 function setup() {
   const props = PropertiesService.getScriptProperties();
   let token = props.getProperty('TOKEN');
@@ -32,18 +43,18 @@ function setup() {
     token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
     props.setProperty('TOKEN', token);
   }
-  // Overí prístup ku Gmailu (vyvolá povolenie, ak ešte nebolo udelené)
+  // Overí prístup ku Gmailu aj k Tabuľkám (vyvolá povolenie, ak ešte nebolo udelené)
   const test = GmailApp.search(buildQuery(0), 0, 5).length;
+  const db = getDb();
+  Logger.log('Gmail OK — vlákien od banky za posledných %s dní (ukážka): %s', FIRST_SYNC_DAYS, test);
+  Logger.log('Tabuľka so synchronizovanými dátami: %s', db.getUrl());
+
   const url = ScriptApp.getService().getUrl();
-  Logger.log('Nájdených vlákien od banky za posledných %s dní (ukážka): %s', FIRST_SYNC_DAYS, test);
   if (url && /\/exec$/.test(url)) {
     Logger.log('ODKAZ PRE APPKU (skopíruj celý riadok):\n%s?token=%s', url, token);
-  } else if (url) {
-    Logger.log('ODKAZ PRE APPKU – časť 1 (kľúč), vlož do appky:\n%s?token=%s', url, token);
-    Logger.log('Časť 2: Deploy → Manage deployments → skopíruj „Web app URL“ (končí /exec) a vlož ju do appky tiež.');
   } else {
-    Logger.log('Najprv nasaď skript ako Webovú aplikáciu (krok 2), potom spusti setup znova.');
-    Logger.log('TOKEN: %s', token);
+    Logger.log('KĽÚČ: ?token=%s', token);
+    Logger.log('Odkaz pre appku = Web app URL z Deploy → Manage deployments (končí /exec) + ?token=… vyššie.');
   }
 }
 
@@ -53,13 +64,47 @@ function resetToken() {
   setup();
 }
 
-/* ---------- API pre appku ---------- */
+/* =========================================================================
+ *  API pre appku
+ * ========================================================================= */
+
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  const token = PropertiesService.getScriptProperties().getProperty('TOKEN');
   const cb = /^[A-Za-z_$][\w$]{0,63}$/.test(p.callback || '') ? p.callback : '';
-  if (!token || p.token !== token) return json({ ok: false, error: 'unauthorized' }, cb);
+  if (!authorized(p.token)) return json({ ok: false, error: 'unauthorized' }, cb);
 
+  try {
+    if (p.action === 'pull') return json(syncPull(p), cb);
+    if (p.action === 'ping') return json({ ok: true, version: SCRIPT_VERSION }, cb);
+    return json(gmailItems(p), cb);
+  } catch (err) {
+    return json({ ok: false, error: String(err && err.message || err) }, cb);
+  }
+}
+
+/** POST (synchronizácia — odoslanie zmien). Telo je JSON ako text/plain. */
+function doPost(e) {
+  let p;
+  try { p = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad-json' }); }
+  if (!authorized(p.token)) return json({ ok: false, error: 'unauthorized' });
+  try {
+    if (p.action === 'push') return json(syncPush(p));
+    return json({ ok: false, error: 'unknown-action' });
+  } catch (err) {
+    return json({ ok: false, error: String(err && err.message || err) });
+  }
+}
+
+function authorized(token) {
+  const t = PropertiesService.getScriptProperties().getProperty('TOKEN');
+  return Boolean(t) && token === t;
+}
+
+/* =========================================================================
+ *  Gmail
+ * ========================================================================= */
+
+function gmailItems(p) {
   const after = Math.max(0, parseInt(p.after || '0', 10) || 0); // unix sekundy
   const threads = GmailApp.search(buildQuery(after), 0, MAX_THREADS);
   const items = [];
@@ -80,10 +125,9 @@ function doGet(e) {
   });
 
   items.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-  return json({ ok: true, now: Math.floor(Date.now() / 1000), items: items }, cb);
+  return { ok: true, now: Math.floor(Date.now() / 1000), items: items };
 }
 
-/* ---------- Pomocné ---------- */
 function buildQuery(after) {
   const from = 'from:(' + SENDERS.join(' OR ') + ')';
   return from + (after ? ' after:' + after : ' newer_than:' + FIRST_SYNC_DAYS + 'd');
@@ -103,11 +147,145 @@ function cleanBody(text) {
   return t.trim().slice(0, 4000);
 }
 
+/* =========================================================================
+ *  Synchronizácia
+ *
+ *  Každý záznam má updatedAt (čas poslednej zmeny v zariadení). Pri konflikte
+ *  vyhrá novšia zmena. Zmazané položky ostávajú ako "zmazané" riadky, aby sa
+ *  zmazanie prenieslo aj do ostatných zariadení.
+ *
+ *  rev = poradové číslo zmeny na serveri. Zariadenie si pamätá posledné rev
+ *  a pri ďalšej synchronizácii si stiahne len novšie zmeny.
+ * ========================================================================= */
+
+const DB_NAME = 'Financie – dáta';
+const TX_SHEET = 'Transakcie';
+const RULE_SHEET = 'Pravidlá';
+const TX_HEAD = ['id', 'dátum', 'suma', 'obchodník', 'kategória', 'stav', 'poznámka', 'zdroj', 'zmazané', 'updatedAt', 'rev', 'json'];
+const TX_UPDATED = 9, TX_REV = 10, TX_JSON = 11;
+const RULE_HEAD = ['kľúč', 'kategória', 'zmazané', 'updatedAt', 'rev'];
+const RULE_UPDATED = 3, RULE_REV = 4;
+
+function getDb() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('DB_ID');
+  if (id) {
+    try { return SpreadsheetApp.openById(id); } catch (err) { /* zmazaná tabuľka → vytvor novú */ }
+  }
+  const ss = SpreadsheetApp.create(DB_NAME);
+  const tx = ss.getSheets()[0];
+  tx.setName(TX_SHEET);
+  tx.getRange(1, 1, 1, TX_HEAD.length).setValues([TX_HEAD]).setFontWeight('bold');
+  tx.setFrozenRows(1);
+  tx.getRange('A:B').setNumberFormat('@'); // id a dátum ako text (Tabuľky by dátum prepísali)
+  tx.getRange('D:I').setNumberFormat('@');
+  const rules = ss.insertSheet(RULE_SHEET);
+  rules.getRange(1, 1, 1, RULE_HEAD.length).setValues([RULE_HEAD]).setFontWeight('bold');
+  rules.setFrozenRows(1);
+  rules.getRange('A:C').setNumberFormat('@');
+  props.setProperty('DB_ID', ss.getId());
+  props.setProperty('REV', '0');
+  return ss;
+}
+
+function syncPush(p) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(25000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const ss = getDb();
+    const rev = Number(props.getProperty('REV') || 0) + 1;
+
+    let changed = upsert(ss.getSheetByName(TX_SHEET), p.transactions || [], function (t) { return t.id; }, function (t) {
+      return [
+        String(t.id), t.date || '', t.deleted ? '' : Number(t.amount) || 0, t.merchant || '', t.category || '',
+        t.deleted ? '' : (t.status === 'approved' ? 'schválené' : 'čaká'), t.note || '', t.source || '',
+        t.deleted ? 'áno' : '', Number(t.updatedAt) || 0, rev, JSON.stringify(t),
+      ];
+    }, TX_UPDATED);
+
+    changed += upsert(ss.getSheetByName(RULE_SHEET), p.rules || [], function (r) { return r.key; }, function (r) {
+      return [String(r.key), r.deleted ? '' : r.category || '', r.deleted ? 'áno' : '', Number(r.updatedAt) || 0, rev];
+    }, RULE_UPDATED);
+
+    if (changed) props.setProperty('REV', String(rev));
+    if (p.device && p.pushId) props.setProperty('ACK_' + String(p.device).slice(0, 64), String(p.pushId));
+    return { ok: true, changed: changed, rev: Number(props.getProperty('REV') || 0) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Vloží/aktualizuje záznamy podľa kľúča; staršia zmena (updatedAt) nikdy neprepíše novšiu. */
+function upsert(sheet, records, keyOf, rowOf, updatedCol) {
+  // Duplicitné kľúče v jednej dávke → nechaj najnovší
+  const latest = {};
+  records.forEach(function (r) {
+    const k = String(keyOf(r) || '');
+    if (!k) return;
+    if (!latest[k] || Number(latest[k].updatedAt) < Number(r.updatedAt)) latest[k] = r;
+  });
+
+  const values = sheet.getDataRange().getValues();
+  const index = {};
+  for (let i = 1; i < values.length; i++) index[String(values[i][0])] = i;
+
+  const appends = [];
+  let n = 0;
+  Object.keys(latest).forEach(function (k) {
+    const rec = latest[k];
+    const row = rowOf(rec);
+    if (k in index) {
+      const i = index[k];
+      if (Number(values[i][updatedCol]) >= Number(rec.updatedAt)) return; // server má novšie
+      sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+    } else {
+      appends.push(row);
+    }
+    n++;
+  });
+  if (appends.length) sheet.getRange(sheet.getLastRow() + 1, 1, appends.length, appends[0].length).setValues(appends);
+  return n;
+}
+
+function syncPull(p) {
+  const props = PropertiesService.getScriptProperties();
+  const ss = getDb();
+  const since = Number(p.since || 0);
+  const rev = Number(props.getProperty('REV') || 0);
+
+  const transactions = [];
+  ss.getSheetByName(TX_SHEET).getDataRange().getValues().slice(1).forEach(function (r) {
+    if (Number(r[TX_REV]) <= since) return;
+    try { transactions.push(JSON.parse(r[TX_JSON])); } catch (err) { /* poškodený riadok preskoč */ }
+  });
+
+  const rules = [];
+  ss.getSheetByName(RULE_SHEET).getDataRange().getValues().slice(1).forEach(function (r) {
+    if (Number(r[RULE_REV]) <= since) return;
+    rules.push({ key: String(r[0]), category: r[1] || null, deleted: r[2] === 'áno', updatedAt: Number(r[RULE_UPDATED]) || 0 });
+  });
+
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    rev: rev,
+    ack: p.device ? props.getProperty('ACK_' + String(p.device).slice(0, 64)) || '' : '',
+    sheetUrl: ss.getUrl(),
+    transactions: transactions,
+    rules: rules,
+  };
+}
+
+/* =========================================================================
+ *  Pomocné
+ * ========================================================================= */
+
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** JSON, alebo JSONP (callback) — JSONP funguje aj v appke na ploche iPhonu, kde iOS blokuje fetch. */
+/** JSON, alebo JSONP (callback) — JSONP funguje aj v appke na ploche iPhonu. */
 function json(obj, callback) {
   if (callback) {
     return ContentService.createTextOutput(callback + '(' + JSON.stringify(obj) + ');')
