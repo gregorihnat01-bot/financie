@@ -393,3 +393,81 @@ input[type="date"].input { display: block; }
   .tiles { grid-template-columns: 1fr 1fr; }
   .tiles .tile:last-child { grid-column: span 2; }
 }
+
+/* =========================================================================
+   Splash — úvodná animácia pri otvorení appky
+   Poradie: scéna → logo (opacity + scale + blur) → stĺpce grafu → šípka
+            → názov (posun nahor) → žiara → prechod na dashboard.
+   Animujú sa len opacity / transform / malý filter: blur → plynulé aj na iPhone.
+   ========================================================================= */
+.splash {
+  position: fixed; inset: 0; z-index: 1000;
+  display: grid; place-items: center;
+  padding: var(--safe-t) 16px var(--safe-b);
+  background: var(--bg);
+  transition: opacity .6s cubic-bezier(.4, 0, .2, 1);
+}
+.splash__stage {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  margin-bottom: 6vh; /* opticky stred */
+  animation: splashFade .5s cubic-bezier(.4, 0, .2, 1) both;
+  transition: transform .7s var(--ease), filter .7s var(--ease);
+}
+.splash__mark {
+  width: 96px; height: 96px; border-radius: 24px;
+  display: grid; place-items: center;
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 18px 40px rgba(0, 0, 0, .6);
+  animation: splashMark .9s cubic-bezier(.16, 1, .3, 1) .1s both;
+}
+.splash__mark svg { overflow: visible; }
+.splash__bar { transform-box: fill-box; transform-origin: 50% 100%; animation: splashBar .75s cubic-bezier(.16, 1, .3, 1) both; }
+.splash__bar--1 { animation-delay: .3s; }
+.splash__bar--2 { animation-delay: .38s; }
+.splash__bar--3 { animation-delay: .46s; }
+.splash__arrow { animation: splashArrow .6s cubic-bezier(.16, 1, .3, 1) .62s both; }
+.splash__name {
+  margin-top: 22px;
+  font-size: 34px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1;
+  color: var(--text);
+  animation: splashName .8s cubic-bezier(.16, 1, .3, 1) .48s both;
+}
+.splash__glow {
+  position: absolute; left: 50%; bottom: -34px; z-index: -1;
+  width: 190px; height: 56px; margin-left: -95px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(48, 209, 88, .26), rgba(48, 209, 88, 0));
+  filter: blur(14px);
+  pointer-events: none;
+  animation: splashGlow 1.2s cubic-bezier(.4, 0, .2, 1) .7s both;
+}
+
+@keyframes splashFade  { from { opacity: 0; } }
+@keyframes splashMark  { from { opacity: 0; transform: scale(.82); filter: blur(10px); } }
+@keyframes splashBar   { from { opacity: 0; transform: scaleY(.3); } }
+@keyframes splashArrow { from { opacity: 0; transform: translateY(16px); } }
+@keyframes splashName  { from { opacity: 0; transform: translateY(12px); filter: blur(6px); } }
+@keyframes splashGlow  { from { opacity: 0; transform: scale(.6); } }
+
+/* Odchod: splash sa rozplynie a mierne priblíži, dashboard sa zozadu zaostrí na miesto */
+.splash.is-leaving { opacity: 0; pointer-events: none; }
+.splash.is-leaving .splash__stage { transform: scale(1.06); filter: blur(8px); }
+
+body.is-launching .topbar,
+body.is-launching .views { opacity: 0; transform: scale(.975); }
+body.is-launching .tabbar { opacity: 0; transform: translateY(10px); }
+body.is-launching { overflow: hidden; }
+body.is-revealing .topbar,
+body.is-revealing .views,
+body.is-revealing .tabbar { transition: opacity .6s var(--ease) .08s, transform .8s var(--ease) .08s; }
+body.is-revealing .views { transform-origin: 50% 20%; }
+
+/* Obmedziť pohyb: bez posunov, zväčšení a rozostrení — len krátke prelínanie */
+@media (prefers-reduced-motion: reduce) {
+  .splash__stage, .splash__mark, .splash__bar, .splash__arrow, .splash__name, .splash__glow { animation: none !important; }
+  .splash.is-leaving .splash__stage { transform: none; filter: none; }
+  #splash.is-leaving { transition: opacity .3s linear !important; }
+  body.is-launching .topbar, body.is-launching .views, body.is-launching .tabbar { transform: none; }
+}

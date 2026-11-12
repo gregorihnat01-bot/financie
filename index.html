@@ -16,7 +16,62 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="css/app.css">
 </head>
-<body>
+<body class="is-launching">
+  <!-- Úvodná animácia: len pri otvorení appky (riadi ju skript nižšie, štýly v css/app.css → Splash) -->
+  <div id="splash" class="splash" aria-hidden="true">
+    <div class="splash__stage">
+      <div class="splash__mark">
+        <svg viewBox="80 38 352 392" width="56" height="62">
+          <defs>
+            <linearGradient id="splash-g" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#3ae374"/><stop offset="1" stop-color="#1a9e48"/>
+            </linearGradient>
+          </defs>
+          <rect class="splash__bar splash__bar--1" x="96" y="300" width="64" height="116" rx="16" fill="#3a3a3c"/>
+          <rect class="splash__bar splash__bar--2" x="192" y="232" width="64" height="184" rx="16" fill="#636366"/>
+          <rect class="splash__bar splash__bar--3" x="288" y="168" width="64" height="248" rx="16" fill="url(#splash-g)"/>
+          <g class="splash__arrow" fill="none" stroke="#30d158" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M300 118 352 66l52 52"/><path d="M352 70v120"/>
+          </g>
+        </svg>
+      </div>
+      <div class="splash__name">Financie</div>
+      <div class="splash__glow"></div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var el = document.getElementById('splash'), body = document.body, gone = false;
+      function done() {
+        if (gone) return;
+        gone = true;
+        body.classList.remove('is-launching', 'is-revealing');
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      }
+      var seen = false;
+      try { seen = sessionStorage.getItem('financie.splash') === '1'; sessionStorage.setItem('financie.splash', '1'); } catch (e) {}
+      // Znovunačítanie v tej istej relácii alebo odkaz zo Skratiek → rovno dashboard
+      if (seen || /[?&](add|import)=/.test(location.search)) { done(); return; }
+
+      var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var minHold = reduce ? 650 : 1500, start = Date.now(), left = false;
+      function leave() {
+        if (left) return;
+        left = true;
+        el.classList.add('is-leaving');
+        body.classList.add('is-revealing');
+        body.classList.remove('is-launching');
+        setTimeout(done, reduce ? 350 : 850);
+      }
+      // Odíď až keď je dashboard vykreslený (load) a animácia dobehla
+      function whenReady() { setTimeout(leave, Math.max(0, minHold - (Date.now() - start))); }
+      if (document.readyState === 'complete') whenReady();
+      else window.addEventListener('load', whenReady);
+      setTimeout(done, 5000); // poistka
+    })();
+  </script>
+  <noscript><style>.splash { display: none; } body.is-launching .topbar, body.is-launching .views, body.is-launching .tabbar { opacity: 1; transform: none; }</style></noscript>
+
   <div class="ambient" aria-hidden="true"></div>
 
   <header class="topbar">
