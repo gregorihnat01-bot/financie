@@ -54,6 +54,8 @@ const ui = {
   focusId: null,
 };
 
+const APP_VERSION = '6';
+
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
 /* =========================================================================
@@ -704,7 +706,7 @@ function openSettings() {
         ${row('demo', '🧪', 'Načítať ukážkové dáta')}
         ${row('wipe', '🗑️', '<span style="color:var(--red)">Vymazať všetky dáta</span>')}
       </div>
-      <p class="muted small" style="margin:16px 4px 0;text-align:center">Dáta sú uložené len v tomto zariadení (LocalStorage).<br>Nikam sa neposielajú.</p>`,
+      <p class="muted small" style="margin:16px 4px 0;text-align:center">Dáta sú uložené len v tomto zariadení (LocalStorage).<br>Nikam sa neposielajú.<br>Verzia ${APP_VERSION}</p>`,
     onMount(sheet, close) {
       sheet.addEventListener('click', e => {
         const b = e.target.closest('[data-action]');
@@ -1295,7 +1297,15 @@ syncGmail();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncGmail(); });
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {}));
+  // Keď sa nainštaluje nová verzia, raz sa obnovíme, aby hneď bežal nový kód
+  let reloaded = false;
+  const hadController = Boolean(navigator.serviceWorker.controller); // prvá inštalácia = bez reloadu
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded || !hadController) return;
+    reloaded = true;
+    if (!activeSheet) location.reload();
+  });
 }
 
 // Ladenie z konzoly: window.financie.store

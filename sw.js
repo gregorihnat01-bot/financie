@@ -1,5 +1,5 @@
 /* Service worker — offline app shell. Pri zmene súborov zvýš VERSION. */
-const VERSION = 'financie-v5';
+const VERSION = 'financie-v6';
 const SHELL = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/store.js', './js/parser.js', './js/ui.js',
@@ -7,7 +7,10 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' obíde HTTP cache prehliadača (GitHub Pages drží súbory 10 min) → vždy čerstvé súbory
+  e.waitUntil(caches.open(VERSION)
+    .then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -24,14 +27,14 @@ self.addEventListener('fetch', e => {
 
   // Navigácie (aj s ?add=…): network-first, offline fallback na index.html
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.match('./index.html', { ignoreSearch: true })));
+    e.respondWith(fetch(req, { cache: 'no-cache' }).catch(() => caches.match('./index.html', { ignoreSearch: true })));
     return;
   }
   // Vlastné súbory: stale-while-revalidate
   if (url.origin === location.origin) {
     e.respondWith(caches.open(VERSION).then(async cache => {
       const cached = await cache.match(req, { ignoreSearch: true });
-      const fresh = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => cached);
+      const fresh = fetch(req, { cache: 'no-cache' }).then(res => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => cached);
       return cached || fresh;
     }));
     return;
