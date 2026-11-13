@@ -217,8 +217,10 @@ export const store = {
     const items = [];
     let skipped = 0;
     for (const raw of list) {
-      const t = sanitizeTx({ ...raw, id: uid(), createdAt: Date.now() });
+      // Import môže poslať vlastné stabilné ID (napr. platby z výpisu) → opakovaný import ich preskočí
+      const t = sanitizeTx({ ...raw, id: raw.id || uid(), createdAt: Date.now() });
       if (!t) { skipped++; continue; }
+      if (raw.id && state.transactions.some(x => x.id === raw.id)) { skipped++; continue; }
       if (dedupe && existing.has(fp(t))) { skipped++; continue; }
       existing.add(fp(t));
       items.push(t);

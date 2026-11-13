@@ -40,7 +40,7 @@ function fmtDay(iso, long = false) {
 }
 const monthLabel = m => monthFmt.format(isoToDate(m + '-01'));
 
-const SOURCE_LABEL = { eml: 'E-mail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', gmail: 'Gmail', excel: 'Excel' };
+const SOURCE_LABEL = { eml: 'E-mail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', gmail: 'Gmail', excel: 'Excel', vypis: 'Výpis' };
 const plural = (n, one, few, many) => `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
 
 /* =========================================================================
@@ -55,7 +55,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '15';
+const APP_VERSION = '16';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -319,7 +319,9 @@ function renderOverview() {
   const maxRow = Math.max(1, ...rows.map(r => r.v));
 
   const rateText = st.savingsRate == null ? 'Zatiaľ žiadny príjem v tomto mesiaci'
-    : `Ušetrené ${Math.round(st.savingsRate * 100)} % príjmu (pred investíciami)`;
+    : st.savingsRate < 0
+      ? `Výdavky prevýšili príjem o ${fmt(st.expenses - st.income)}${st.oneOff ? ` · z toho jednorazové ${fmt(st.oneOff)}` : ''}`
+      : `Ušetrené ${Math.round(st.savingsRate * 100)} % príjmu (pred investíciami)`;
 
   view.innerHTML = `
     <div class="month-nav">
@@ -988,7 +990,9 @@ function importPrepared(data) {
     source: t.source || 'excel',
     status: CAT[t.category] ? 'approved' : 'pending',
   }));
-  const { added, skipped } = store.addTransactions(list);
+  // Položky s vlastným ID (výpis z banky) sa kontrolujú len podľa ID — rovnaké platby v ten istý deň sú legitímne
+  const withIds = list.length > 0 && list.every(t => t.id);
+  const { added, skipped } = store.addTransactions(list, { dedupe: !withIds });
   toast(added
     ? `📥 Importované: ${plural(added, 'položka', 'položky', 'položiek')}${data.label ? ` · ${data.label}` : ''}${skipped ? ` (${skipped} už v appke boli)` : ''}`
     : 'Tieto položky už v appke sú');

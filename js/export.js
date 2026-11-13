@@ -11,7 +11,7 @@ import { store, CATEGORIES, CAT, KIND_LABEL, todayISO } from './store.js';
 const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 const DAYS = ['nedeľa', 'pondelok', 'utorok', 'streda', 'štvrtok', 'piatok', 'sobota'];
 const MONTHS = ['január', 'február', 'marec', 'apríl', 'máj', 'jún', 'júl', 'august', 'september', 'október', 'november', 'december'];
-const SOURCE = { eml: 'E-mail', gmail: 'Gmail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', excel: 'Excel' };
+const SOURCE = { eml: 'E-mail', gmail: 'Gmail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', excel: 'Excel', vypis: 'Výpis z banky' };
 
 /* =========================================================================
  *  Obdobie
