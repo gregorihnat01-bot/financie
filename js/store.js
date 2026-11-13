@@ -445,3 +445,43 @@ export function monthInsights(month = todayISO().slice(0, 7)) {
     suggestedBudget,
   };
 }
+
+/* ---------- Účty a čistý majetok ----------
+ * Zostatky zadáva používateľ ručne (appka banku nevidí). Hlavný účet sa potom odhaduje:
+ * posledný zadaný zostatok + všetky platby zaznamenané po tomto okamihu.
+ */
+export const ACCOUNT_KINDS = {
+  main: { label: 'Bežný účet', icon: '🏦' },
+  savings: { label: 'Úspory', icon: '🐷' },
+  invest: { label: 'Investície', icon: '📈' },
+  loan: { label: 'Úver', icon: '💳' },
+};
+
+export function accountsSummary() {
+  const accounts = Array.isArray(state.settings.accounts) ? state.settings.accounts.filter(a => a && ACCOUNT_KINDS[a.kind]) : [];
+  if (!accounts.length) return null;
+  const sum = kind => round2(accounts.filter(a => a.kind === kind).reduce((s, a) => s + (Number(a.balance) || 0), 0));
+  const main = accounts.find(a => a.kind === 'main');
+  let mainNow = null;
+  let mainDelta = 0;
+  if (main) {
+    const at = Number(main.at) || 0;
+    const d = new Date(at);
+    const day0 = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    for (const t of state.transactions) {
+      // platby po zadaní zostatku (neskorší deň, alebo v ten istý deň pridané až po zadaní)
+      if (t.date > day0 || (t.date === day0 && t.createdAt > at)) mainDelta += t.amount;
+    }
+    mainNow = round2((Number(main.balance) || 0) + mainDelta);
+  }
+  const otherMain = round2(accounts.filter(a => a.kind === 'main' && a !== main).reduce((s, a) => s + (Number(a.balance) || 0), 0));
+  const savings = sum('savings');
+  const invest = sum('invest');
+  const loan = sum('loan'); // záporné číslo
+  const liquid = round2((mainNow ?? 0) + otherMain + savings);
+  return {
+    accounts, main, mainNow, mainDelta: round2(mainDelta), savings, invest, loan, liquid,
+    net: round2(liquid + invest + loan),
+    updatedAt: Math.max(...accounts.map(a => Number(a.at) || 0)),
+  };
+}
