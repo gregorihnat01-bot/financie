@@ -457,8 +457,9 @@ export const ACCOUNT_KINDS = {
   loan: { label: 'Úver', icon: '💳' },
 };
 
-export function accountsSummary() {
-  const accounts = Array.isArray(state.settings.accounts) ? state.settings.accounts.filter(a => a && ACCOUNT_KINDS[a.kind]) : [];
+export function accountsSummary(onlyIds = null) {
+  const accounts = (Array.isArray(state.settings.accounts) ? state.settings.accounts : [])
+    .filter(a => a && ACCOUNT_KINDS[a.kind] && (!onlyIds || onlyIds.includes(a.id)));
   if (!accounts.length) return null;
   const sum = kind => round2(accounts.filter(a => a.kind === kind).reduce((s, a) => s + (Number(a.balance) || 0), 0));
   const main = accounts.find(a => a.kind === 'main');

@@ -55,7 +55,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '18';
+const APP_VERSION = '19';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -258,12 +258,12 @@ function dashboardHTML() {
 
 /* ---------- Účty a čistý majetok ---------- */
 function accountsHTML() {
-  const a = accountsSummary();
+  const a = accountsSummary(ACCOUNT_IDS);
   if (!a) {
     return `
       <button class="dash-budget dash-budget--empty" data-action="accounts">
         <span>🏦 <b>Zadať zostatky účtov</b></span>
-        <span class="muted small">Uvidíš aktuálny stav účtu, úspory, úver a čistý majetok</span>
+        <span class="muted small">Uvidíš aktuálny stav hlavného a sporiaceho účtu</span>
       </button>`;
   }
   const days = Math.floor((Date.now() - a.updatedAt) / 86400000);
@@ -271,32 +271,29 @@ function accountsHTML() {
   return `
     <button class="dash-budget dash-accounts" data-action="accounts" aria-label="Upraviť zostatky účtov">
       <span class="acc-grid">
-        ${a.main ? tile(`${esc(a.main.name || 'Bežný účet')}${a.mainDelta ? ' ≈' : ''}`, fmtShort(a.mainNow)) : ''}
-        ${a.savings ? tile('Úspory', fmtShort(a.savings)) : ''}
-        ${a.invest ? tile('Investície', fmtShort(a.invest)) : ''}
-        ${a.loan ? tile('Úver', fmtShort(a.loan), 'neg-red') : ''}
+        ${a.main ? tile(`${esc(a.main.name || 'Hlavný účet')}${a.mainDelta ? ' ≈' : ''}`, fmtShort(a.mainNow)) : ''}
+        ${a.accounts.filter(x => x.kind === 'savings').map(x => tile(esc(x.name), fmtShort(x.balance))).join('')}
       </span>
-      <span class="dash-budget__row small"><span class="muted">Čistý majetok${a.loan ? ' (bez auta)' : ''}</span><b class="num">${fmtSigned(a.net)}</b></span>
+      ${a.main && a.savings ? `<span class="dash-budget__row small"><span class="muted">Spolu</span><b class="num">${fmt(a.liquid)}</b></span>` : ''}
       <span class="dash-budget__hint">${days > 30 ? '⚠️ ' : ''}Zostatky zadané ${days === 0 ? 'dnes' : days === 1 ? 'včera' : `pred ${plural(days, 'dňom', 'dňami', 'dňami')}`}${a.mainDelta ? ` · bežný účet dopočítaný o ${fmtSigned(a.mainDelta)} z nových platieb` : ''}</span>
     </button>`;
 }
 
+// Zobrazujú sa len tieto účty (ostatné, ak boli zadané skôr, sa ignorujú)
 const DEFAULT_ACCOUNTS = [
   { id: 'main', name: 'Hlavný účet', kind: 'main' },
-  { id: 'sec', name: 'Sekundárny účet', kind: 'savings' },
   { id: 'sav', name: 'Sporiaci účet', kind: 'savings' },
-  { id: 'funds', name: 'Fondy', kind: 'invest' },
-  { id: 'loan', name: 'Spotrebiteľský úver', kind: 'loan' },
 ];
+const ACCOUNT_IDS = DEFAULT_ACCOUNTS.map(a => a.id);
 
 function openAccountsSheet() {
   const saved = Array.isArray(store.state.settings.accounts) ? store.state.settings.accounts : [];
   const list = DEFAULT_ACCOUNTS.map(d => ({ ...d, ...(saved.find(x => x.id === d.id) || {}) }));
-  const a = accountsSummary();
+  const a = accountsSummary(ACCOUNT_IDS);
   openSheet({
     title: 'Zostatky účtov',
     html: `
-      <p class="muted small" style="margin:0 4px 12px">Opíš zostatky z appky ČSOB (Moje produkty). Bežný účet sa potom sám dopočítava podľa nových platieb, ostatné aktualizuj, keď chceš (stačí raz za mesiac).</p>
+      <p class="muted small" style="margin:0 4px 12px">Opíš zostatky z appky ČSOB (Moje produkty). Hlavný účet sa potom sám dopočítava podľa nových platieb, sporiaci aktualizuj, keď chceš.</p>
       ${a?.mainDelta ? `<p class="small" style="margin:0 4px 12px">Hlavný účet podľa appky teraz: <b class="num">${fmt(a.mainNow)}</b>. Ak ČSOB ukazuje inú sumu, chýba nejaká platba alebo príde neskôr.</p>` : ''}
       <form id="acc-form" autocomplete="off">
         ${list.map(x => `
@@ -324,8 +321,8 @@ function openAccountsSheet() {
         store.setSetting('accounts', accounts);
         haptic('success');
         close();
-        const s = accountsSummary();
-        toast(s ? `🏦 Uložené · čistý majetok ${fmtSigned(s.net)}` : 'Zostatky odstránené');
+        const s = accountsSummary(ACCOUNT_IDS);
+        toast(s ? `🏦 Uložené · spolu ${fmt(s.liquid)}` : 'Zostatky odstránené');
       });
       $('#acc-clear', sheet)?.addEventListener('click', () => { store.setSetting('accounts', []); close(); toast('Zostatky odstránené'); });
     },
@@ -1043,7 +1040,7 @@ function openSettings() {
           <span class="switch" aria-hidden="true"></span>
         </button>
         ${row('budget', '🎯', 'Mesačný rozpočet', Number(store.state.settings.budget) ? fmtShort(store.state.settings.budget) : 'Nenastavený')}
-        ${row('accounts', '🏦', 'Zostatky účtov', accountsSummary() ? `Čistý majetok ${fmtSigned(accountsSummary().net)}` : 'Nezadané')}
+        ${row('accounts', '🏦', 'Zostatky účtov', accountsSummary(ACCOUNT_IDS) ? `Hlavný + sporiaci: ${fmt(accountsSummary(ACCOUNT_IDS).liquid)}` : 'Nezadané')}
       </div>
 
       <div class="section-title">Pravidlá</div>
