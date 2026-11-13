@@ -169,15 +169,15 @@ svg { display: block; }
 .card__footer .btn { min-height: 40px; font-size: 15px; font-weight: 500; color: var(--text-2); background: none; border: 0; padding: 0 6px; }
 
 /* Kategórie: 4×2 mriežka, 1 tap = schválenie */
-.cat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+.cat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 12px; }
 .cat-btn {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  min-height: 68px; padding: 8px 2px; border-radius: var(--r);
+  min-height: 64px; padding: 8px 1px; border-radius: 14px;
   background: var(--glass); border: 1px solid var(--hairline);
-  font-size: 11px; font-weight: 500; color: var(--text-2); line-height: 1.15; text-align: center;
+  font-size: 10.5px; letter-spacing: -0.02em; font-weight: 500; color: var(--text-2); line-height: 1.15; text-align: center;
   transition: transform .15s var(--ease), background .15s, border-color .15s;
 }
-.cat-btn .emoji { font-size: 24px; line-height: 1; }
+.cat-btn .emoji { font-size: 22px; line-height: 1; }
 .cat-btn:active { transform: scale(.93); background: var(--glass-press); }
 .cat-btn.is-selected { border-color: var(--c, var(--green)); background: color-mix(in srgb, var(--c, var(--green)) 18%, transparent); color: var(--text); }
 
@@ -294,6 +294,27 @@ svg { display: block; }
 .tooltip b { display: block; margin-bottom: 4px; font-size: 13px; }
 .tooltip div { display: flex; justify-content: space-between; gap: 14px; color: var(--text-2); }
 .tooltip div span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ---------- Jednorazové výdavky ---------- */
+.oneoff-split { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-top: 8px; font-size: 14px; }
+.oneoff-split b { margin-left: 4px; }
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%;
+  min-height: 56px; padding: 10px 14px; margin: 4px 0 12px; border-radius: var(--r-sm);
+  background: rgba(118, 118, 128, .2); text-align: left;
+}
+.switch-row__text { display: flex; flex-direction: column; font-size: 16px; }
+.switch-row__sub { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+.switch {
+  position: relative; flex: none; width: 51px; height: 31px; border-radius: 16px;
+  background: rgba(120, 120, 128, .32); transition: background .25s var(--ease);
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+  background: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, .25); transition: transform .25s var(--ease);
+}
+.switch-row[aria-checked="true"] .switch { background: var(--green); }
+.switch-row[aria-checked="true"] .switch::after { transform: translateX(20px); }
 
 /* ---------- Tab bar ---------- */
 .tabbar {

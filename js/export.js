@@ -11,7 +11,7 @@ import { store, CATEGORIES, CAT, KIND_LABEL, todayISO } from './store.js';
 const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 const DAYS = ['nedeľa', 'pondelok', 'utorok', 'streda', 'štvrtok', 'piatok', 'sobota'];
 const MONTHS = ['január', 'február', 'marec', 'apríl', 'máj', 'jún', 'júl', 'august', 'september', 'október', 'november', 'december'];
-const SOURCE = { eml: 'E-mail', gmail: 'Gmail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka' };
+const SOURCE = { eml: 'E-mail', gmail: 'Gmail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', excel: 'Excel' };
 
 /* =========================================================================
  *  Obdobie
@@ -93,6 +93,7 @@ export function collect(range, { includePending = true } = {}) {
       expense: t.amount < 0 ? -t.amount : 0,
       income: t.amount > 0 ? t.amount : 0,
       status: t.status === 'approved' ? 'Schválené' : 'Čaká',
+      oneOff: t.oneOff ? 'Áno' : '',
       note: t.note || '',
       source: SOURCE[t.source] || t.source,
     };
@@ -101,10 +102,12 @@ export function collect(range, { includePending = true } = {}) {
   // Súhrn rovnako ako v Prehľade: len schválené, presuny sa nerátajú, vratky znižujú výdavok
   const byCat = Object.fromEntries(CATEGORIES.map(c => [c.id, { sum: 0, count: 0 }]));
   const byMonth = {};
+  let oneOff = 0;
   for (const t of tx) {
     if (t.status !== 'approved') continue;
     const c = CAT[t.category];
     const v = c.kind === 'income' ? t.amount : -t.amount;
+    if (t.oneOff && (c.kind === 'variable' || c.kind === 'fixed')) oneOff += v;
     byCat[c.id].sum += v;
     byCat[c.id].count++;
     const m = t.date.slice(0, 7);
@@ -119,7 +122,7 @@ export function collect(range, { includePending = true } = {}) {
     range, rows,
     pending: tx.filter(t => t.status !== 'approved').length,
     summary: {
-      income, variable, fixed, invest, expenses,
+      income, variable, fixed, invest, expenses, oneOff: r2(oneOff),
       balance: r2(income - expenses - invest),
       savingsRate: income > 0 ? (income - expenses) / income : null,
       categories: CATEGORIES.map(c => ({ ...c, sum: r2(byCat[c.id].sum), count: byCat[c.id].count })).filter(c => c.count),
@@ -135,7 +138,7 @@ export function collect(range, { includePending = true } = {}) {
  *  CSV (Excel SK: ";" + desatinná čiarka + UTF-8 BOM)
  * ========================================================================= */
 
-const HEAD = ['Dátum', 'Deň', 'Obchodník', 'Kategória', 'Skupina', 'Typ', 'Suma (€)', 'Výdavok (€)', 'Príjem (€)', 'Stav', 'Poznámka', 'Zdroj'];
+const HEAD = ['Dátum', 'Deň', 'Obchodník', 'Kategória', 'Skupina', 'Typ', 'Suma (€)', 'Výdavok (€)', 'Príjem (€)', 'Stav', 'Jednorazový', 'Poznámka', 'Zdroj'];
 
 const csvNum = n => (n === 0 ? '0' : n.toFixed(2).replace('.', ','));
 function csvCell(v) {
@@ -147,7 +150,7 @@ function csvCell(v) {
 export function buildCsv(data) {
   const lines = [HEAD.join(';')];
   for (const r of data.rows) {
-    lines.push([skDate(r.date), r.day, r.merchant, r.category, r.group, r.type, csvNum(r.amount), csvNum(r.expense), csvNum(r.income), r.status, r.note, r.source].map(csvCell).join(';'));
+    lines.push([skDate(r.date), r.day, r.merchant, r.category, r.group, r.type, csvNum(r.amount), csvNum(r.expense), csvNum(r.income), r.status, r.oneOff, r.note, r.source].map(csvCell).join(';'));
   }
   return new Blob(['﻿' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
 }
@@ -191,7 +194,7 @@ export async function buildXlsx(data) {
   const { rows, summary, range } = data;
 
   /* Hárok 1: Transakcie */
-  const aoa = [HEAD, ...rows.map(r => [parseISO(r.date), r.day, r.merchant, r.category, r.group, r.type, r.amount, r.expense || null, r.income || null, r.status, r.note, r.source])];
+  const aoa = [HEAD, ...rows.map(r => [parseISO(r.date), r.day, r.merchant, r.category, r.group, r.type, r.amount, r.expense || null, r.income || null, r.status, r.oneOff, r.note, r.source])];
   const last = aoa.length;
   aoa.push([], ['Spolu']);
   const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
@@ -205,8 +208,8 @@ export async function buildXlsx(data) {
     if (c) c.z = 'd. m. yyyy';
   }
   for (const col of [6, 7, 8]) setFormat(ws, XLSX, col, EUR, 1, last - 1);
-  ws['!cols'] = [12, 10, 30, 24, 14, 11, 12, 12, 12, 11, 28, 11].map(wch => ({ wch }));
-  ws['!autofilter'] = { ref: `A1:L${Math.max(1, last)}` };
+  ws['!cols'] = [12, 10, 30, 24, 14, 11, 12, 12, 12, 11, 12, 28, 11].map(wch => ({ wch }));
+  ws['!autofilter'] = { ref: `A1:M${Math.max(1, last)}` };
   XLSX.utils.book_append_sheet(wb, ws, 'Transakcie');
 
   /* Hárok 2: Súhrn */
@@ -220,6 +223,7 @@ export async function buildXlsx(data) {
     ['Voľné výdavky', summary.variable],
     ['Fixné výdavky', summary.fixed],
     ['Výdavky spolu', summary.expenses],
+    ['  z toho jednorazové (⭐)', summary.oneOff],
     ['Investície a sporenie', summary.invest],
     ['Zostatok (príjmy − výdavky − investície)', summary.balance],
     ['Miera sporenia (pred investíciami)', summary.savingsRate],
@@ -233,10 +237,10 @@ export async function buildXlsx(data) {
   }
   if (data.pending) sAoa.push([], [`Pozor: ${data.pending} neschválených platieb nie je v súhrne započítaných.`]);
   const ss = XLSX.utils.aoa_to_sheet(sAoa);
-  setFormat(ss, XLSX, 1, EUR, 5, 10);
-  const rate = ss['B12']; if (rate && typeof rate.v === 'number') rate.z = PCT;
-  setFormat(ss, XLSX, 3, EUR, 14, 14 + summary.categories.length);
-  setFormat(ss, XLSX, 4, PCT, 14, 14 + summary.categories.length);
+  setFormat(ss, XLSX, 1, EUR, 5, 11);
+  const rate = ss['B13']; if (rate && typeof rate.v === 'number') rate.z = PCT;
+  setFormat(ss, XLSX, 3, EUR, 15, 15 + summary.categories.length);
+  setFormat(ss, XLSX, 4, PCT, 15, 15 + summary.categories.length);
   ss['!cols'] = [{ wch: 42 }, { wch: 18 }, { wch: 8 }, { wch: 14 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, ss, 'Súhrn');
 

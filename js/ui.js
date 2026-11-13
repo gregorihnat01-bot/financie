@@ -40,7 +40,7 @@ function fmtDay(iso, long = false) {
 }
 const monthLabel = m => monthFmt.format(isoToDate(m + '-01'));
 
-const SOURCE_LABEL = { eml: 'E-mail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', gmail: 'Gmail' };
+const SOURCE_LABEL = { eml: 'E-mail', pdf: 'PDF výpis', text: 'Text', clipboard: 'Schránka', shortcut: 'Skratka', manual: 'Ručne', link: 'Odkaz', demo: 'Ukážka', gmail: 'Gmail', excel: 'Excel' };
 const plural = (n, one, few, many) => `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
 
 /* =========================================================================
@@ -55,7 +55,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '14';
+const APP_VERSION = '15';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -339,6 +339,11 @@ function renderOverview() {
       <div class="glass tile"><div class="tile__label">Výdavky</div><div class="tile__value num">${fmtShort(st.expenses)}</div></div>
       <div class="glass tile"><div class="tile__label">Investované</div><div class="tile__value num">${fmtShort(st.invest)}</div></div>
     </div>
+    ${st.oneOff > 0 ? `
+      <div class="glass oneoff-split">
+        <span><span class="muted">Bežné výdavky</span> <b class="num">${fmtShort(st.expenses - st.oneOff)}</b></span>
+        <span><span class="muted">⭐ Jednorazové</span> <b class="num">${fmtShort(st.oneOff)}</b></span>
+      </div>` : ''}
     <button class="btn btn--block btn--sm" style="margin-top:8px" data-action="export">📊 Export do Excelu</button>
 
     ${st.pending ? `
@@ -441,7 +446,7 @@ function bindTrend() {
 
 /* ---------- 3) TRANSAKCIE ---------- */
 const TX_FILTERS = [
-  ['all', 'Všetko'], ['out', 'Výdavky'], ['in', 'Príjmy'], ['pending', 'Čaká'],
+  ['all', 'Všetko'], ['out', 'Výdavky'], ['in', 'Príjmy'], ['pending', 'Čaká'], ['oneoff', '⭐ Jednorazové'],
   ...CATEGORIES.map(c => [`cat:${c.id}`, `${c.icon} ${c.short}`]),
 ];
 
@@ -456,7 +461,7 @@ function txRowHTML(t) {
     <span class="list-row__icon" style="--c:${c ? c.color : '#ff9f0a'}">${c ? c.icon : '⚡'}</span>
     <span class="list-row__main">
       <span class="list-row__title">${esc(t.merchant)}</span>
-      <span class="list-row__sub">${t.status === 'pending' ? '<span class="pill">Čaká</span> ' : ''}${c ? esc(c.short) : 'Nezaradené'}${t.note ? ' · ' + esc(t.note) : ''}</span>
+      <span class="list-row__sub">${t.status === 'pending' ? '<span class="pill">Čaká</span> ' : ''}${t.oneOff ? '⭐ ' : ''}${c ? esc(c.short) : 'Nezaradené'}${t.note ? ' · ' + esc(t.note) : ''}</span>
     </span>
     <span class="list-row__end ${t.amount > 0 ? 'pos' : ''}">${fmtSigned(t.amount)}</span>
   </button>`;
@@ -470,6 +475,7 @@ function filteredTx() {
       if (f === 'out' && t.amount >= 0) return false;
       if (f === 'in' && t.amount <= 0) return false;
       if (f === 'pending' && t.status !== 'pending') return false;
+      if (f === 'oneoff' && !t.oneOff) return false;
       if (f.startsWith('cat:') && t.category !== f.slice(4)) return false;
       if (!q) return true;
       const hay = `${t.merchant} ${t.note} ${t.category ? CAT[t.category].name : ''} ${t.amount.toFixed(2)} ${t.amount.toFixed(2).replace('.', ',')}`
@@ -591,12 +597,20 @@ function openAddSheet(prefill = {}) {
           <label class="field"><span class="field__label">Dátum</span><input class="input" type="date" name="date" value="${esc(prefill.date || todayISO())}"></label>
         </div>
         <label class="field"><span class="field__label">Poznámka (nepovinné)</span><input class="input" name="note" value="${esc(prefill.note || '')}"></label>
+        <button type="button" class="switch-row" id="add-oneoff" role="switch" aria-checked="${false ? 'true' : 'false'}">
+          <span class="switch-row__text"><span>⭐ Jednorazový výdavok</span><span class="switch-row__sub">Väčší nákup, ktorý sa neopakuje každý mesiac</span></span>
+          <span class="switch" aria-hidden="true"></span>
+        </button>
         <div class="field__label" style="margin-top:6px">Kategória (nepovinné — inak ide do inboxu)</div>
         ${catGridHTML(null)}
         <button class="btn btn--primary btn--block" style="margin-top:16px" type="submit" id="add-submit">Pridať do inboxu</button>
       </form>`,
     onMount(sheet, close) {
       const form = $('#add-form', sheet);
+      $('#add-oneoff', sheet).addEventListener('click', e => {
+        const el = e.currentTarget;
+        el.setAttribute('aria-checked', String(el.getAttribute('aria-checked') !== 'true'));
+      });
       const submit = $('#add-submit', sheet);
       $$('[data-type]', sheet).forEach(b => b.addEventListener('click', () => {
         type = b.dataset.type;
@@ -617,6 +631,7 @@ function openAddSheet(prefill = {}) {
         const { items } = store.addTransactions([{
           amount, merchant: String(fd.get('merchant')).trim(), date: fd.get('date') || todayISO(),
           note: String(fd.get('note') || '').trim(), source: prefill.source || 'manual',
+          oneOff: $('#add-oneoff', sheet).getAttribute('aria-checked') === 'true',
         }], { dedupe: false });
         if (cat && items[0]) store.approve(items[0].id, cat);
         close();
@@ -640,6 +655,10 @@ function openEditSheet(id) {
         <label class="field"><span class="field__label">Obchodník</span><input class="input" name="merchant" value="${esc(t.merchant)}"></label>
         <label class="field"><span class="field__label">Dátum</span><input class="input" type="date" name="date" value="${esc(t.date)}"></label>
         <label class="field"><span class="field__label">Poznámka</span><input class="input" name="note" value="${esc(t.note)}"></label>
+        <button type="button" class="switch-row" id="edit-oneoff" role="switch" aria-checked="${t.oneOff ? 'true' : 'false'}">
+          <span class="switch-row__text"><span>⭐ Jednorazový výdavok</span><span class="switch-row__sub">Uloží sa hneď · v Prehľade sa ráta zvlášť</span></span>
+          <span class="switch" aria-hidden="true"></span>
+        </button>
         <div class="field__label" style="margin-top:6px">Kategória — ťuknutím sa uloží hneď</div>
         ${catGridHTML(t.category, 'set-cat')}
         <button class="btn btn--primary btn--block" style="margin-top:16px" type="submit">Uložiť zmeny</button>
@@ -661,6 +680,12 @@ function openEditSheet(id) {
         toast('Uložené');
       });
       $('#edit-delete', sheet).addEventListener('click', () => { close(); deleteTx(id); });
+      $('#edit-oneoff', sheet).addEventListener('click', e => {
+        const on = e.currentTarget.getAttribute('aria-checked') !== 'true';
+        e.currentTarget.setAttribute('aria-checked', String(on));
+        store.update(id, { oneOff: on });
+        toast(on ? '⭐ Označené ako jednorazové' : 'Štítok jednorazové odstránený');
+      });
     },
   });
 }
@@ -685,7 +710,7 @@ function openSettings() {
       <div class="section-title">Import platieb</div>
       <div class="glass list settings-group">
         ${row('gmail', '📬', 'Automatický import z Gmailu', gmailConnected() ? `Pripojené · ${esc(gmailLastText())}` : 'Platby z mailov banky sa načítajú samé')}
-        ${row('import', '📥', 'Vybrať súbory', 'E-mail (.eml), PDF výpis, .txt — aj viac naraz')}
+        ${row('import', '📥', 'Vybrať súbory', 'E-mail (.eml), PDF výpis, .txt, import .json — aj viac naraz')}
         ${row('paste', '📋', 'Vložiť zo schránky', 'Skopírovaný text bankovej notifikácie')}
         ${row('paste-manual', '✍️', 'Vložiť text ručne')}
       </div>
@@ -952,15 +977,41 @@ function importParsed(items, { goToInbox = true } = {}) {
   return true;
 }
 
+/**
+ * Súbor pripravený na import (napr. súhrny z Excelu):
+ * { "financieImport": 1, "label": "…", "transactions": [{ date, amount, merchant, category, note, oneOff }] }
+ * Položky s kategóriou sa rovno schvália. Opakovaný import nevytvorí duplicity.
+ */
+function importPrepared(data) {
+  const list = (data.transactions || []).map(t => ({
+    ...t,
+    source: t.source || 'excel',
+    status: CAT[t.category] ? 'approved' : 'pending',
+  }));
+  const { added, skipped } = store.addTransactions(list);
+  toast(added
+    ? `📥 Importované: ${plural(added, 'položka', 'položky', 'položiek')}${data.label ? ` · ${data.label}` : ''}${skipped ? ` (${skipped} už v appke boli)` : ''}`
+    : 'Tieto položky už v appke sú');
+  if (added) { ui.month = list.map(t => t.date).sort().pop().slice(0, 7); setTab('overview'); }
+}
+
 async function importFiles(files) {
   const all = [];
   const errors = [];
   for (const f of files) {
-    try { all.push(...await parseFile(f)); }
-    catch (e) { errors.push(`${f.name}: ${e.message}`); }
+    try {
+      if (/\.json$/i.test(f.name) || f.type === 'application/json') {
+        const data = JSON.parse(await f.text());
+        if (data?.financieImport) { importPrepared(data); continue; }
+        if (Array.isArray(data?.transactions)) throw new Error('Toto je záloha appky. Použi ⚙️ → Obnoviť zo zálohy.');
+        throw new Error('Neznámy formát JSON.');
+      }
+      all.push(...await parseFile(f));
+    } catch (e) { errors.push(`${f.name}: ${e.message}`); }
   }
-  if (errors.length) toast(errors[0]);
-  if (all.length || !errors.length) importParsed(all);
+  if (errors.length) { toast(errors[0]); return; }
+  if (!all.length && files.some(f => /\.json$/i.test(f.name))) return;
+  importParsed(all);
 }
 
 async function pasteFromClipboard() {

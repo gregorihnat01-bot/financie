@@ -12,12 +12,14 @@
 const STORAGE_KEY = 'financie.v2';
 const SCHEMA_VERSION = 2;
 
-/* ---------- Kategórie (max 8, pevné poradie = pevné farby) ---------- */
+/* ---------- Kategórie (pevné poradie = pevné farby; ID sa nemenia, aby staré dáta ostali platné) ---------- */
 export const CATEGORIES = [
   { id: 'groceries', icon: '🛒', name: 'Potraviny & Domácnosť', short: 'Potraviny',   kind: 'variable', color: '#199e70' },
   { id: 'transport', icon: '🚗', name: 'Doprava & Palivo',      short: 'Doprava',     kind: 'variable', color: '#3987e5' },
   { id: 'fun',       icon: '🍔', name: 'Jedlo vonku & Zábava',  short: 'Zábava',      kind: 'variable', color: '#d95926' },
-  { id: 'housing',   icon: '🏠', name: 'Bývanie & Účty',        short: 'Bývanie',     kind: 'fixed',    color: '#9085e9' },
+  { id: 'sport',     icon: '💪', name: 'Šport & Životný štýl',  short: 'Šport',       kind: 'variable', color: '#2aa1b3' },
+  { id: 'shopping',  icon: '🛍️', name: 'Nákupy & Oblečenie',    short: 'Nákupy',      kind: 'variable', color: '#c75fd6' },
+  { id: 'housing',   icon: '🏠', name: 'Bývanie, Účty & Úver',  short: 'Bývanie',     kind: 'fixed',    color: '#9085e9' },
   { id: 'subs',      icon: '📱', name: 'Predplatné & Služby',   short: 'Predplatné',  kind: 'fixed',    color: '#d55181' },
   { id: 'invest',    icon: '📈', name: 'Investície & Sporenie', short: 'Investície',  kind: 'invest',   color: '#c98500' },
   { id: 'income',    icon: '💼', name: 'Príjem / Mzda',         short: 'Príjem',      kind: 'income',   color: '#30d158' },
@@ -35,11 +37,13 @@ export const KIND_LABEL = {
 
 /* ---------- Heuristiky pre prvý návrh (kým neexistuje naučené pravidlo) ---------- */
 const KEYWORDS = [
-  ['groceries', ['lidl', 'tesco', 'kaufland', 'billa', 'coop', 'jednota', 'terno', 'fresh', 'albert', 'dm drogerie', 'dm ', 'teta', 'rossmann', 'ikea', 'hornbach', 'obi', 'potraviny', 'action', 'pepco', 'kik']],
+  ['groceries', ['lidl', 'tesco', 'kaufland', 'billa', 'coop', 'jednota', 'terno', 'fresh', 'albert', 'dm drogerie', 'dm ', 'teta', 'rossmann', 'ikea', 'hornbach', 'obi', 'potraviny', 'action']],
   ['transport', ['shell', 'omv', 'slovnaft', 'orlen', 'mol ', 'benzin', 'cerpacia', 'parking', 'parkov', 'bolt', 'uber', 'zssk', 'regiojet', 'leo express', 'dpb', 'imhd', 'mhd', 'dialnic', 'eznamka', 'dpmp', 'dpmk', 'dpmz', 'dopravny podnik', 'arriva', 'slovak lines', 'flixbus', 'vinet', 'autoservis', 'pneu']],
   ['fun', ['restaur', 'bistro', 'pizza', 'burger', 'mcdonald', 'kfc', 'starbucks', 'kaviar', 'cafe', 'coffee', 'kava', 'bar ', 'pub', 'wolt', 'foodora', 'bolt food', 'kino', 'cinema', 'cinemax', 'ticket', 'steam', 'playstation', 'xbox']],
-  ['housing', ['najom', 'najomne', 'hypo', 'zse', 'spp', 'vodaren', 'bvs', 'elektr', 'plyn', 'energ', 'sprava domu', 'bytove', 'fond oprav', 'poistenie', 'allianz', 'generali', 'kooperativa', 'union']],
-  ['subs', ['netflix', 'spotify', 'apple.com', 'apple com', 'icloud', 'google', 'youtube', 'disney', 'hbo', 'max.com', 'amazon prime', 'orange', 'telekom', 'o2 ', 'swan', '4ka', 'chatgpt', 'openai', 'anthropic', 'claude', 'microsoft', 'adobe', 'patreon', 'fitness', 'gym']],
+  ['sport', ['fitness', 'fitko', 'gym', 'posilnov', 'decathlon', 'sportisimo', 'hervis', 'intersport', 'top4running', 'gymbeam', 'myprotein', 'nutrend', 'protein', 'strava', 'garmin', 'sauna', 'wellness', 'bazen', 'barber', 'kadern', 'holicstvo', 'holic ', 'dental', 'zubn', 'stomatolog']],
+  ['shopping', ['zara', 'h&m', 'hm ', 'reserved', 'primark', 'bershka', 'pull&bear', 'mango', 'c&a', 'about you', 'aboutyou', 'zalando', 'answear', 'footshop', 'deichmann', 'ccc ', 'klarna', 'alza', 'datart', 'nay ', 'planeo', 'mall.sk', 'amazon', 'aliexpress', 'temu', 'shein', 'notino', 'pepco', 'kik']],
+  ['housing', ['splatka', 'uver', 'spotrebny', 'pozicka', 'najom', 'najomne', 'hypo', 'zse', 'spp', 'vodaren', 'bvs', 'elektr', 'plyn', 'energ', 'sprava domu', 'bytove', 'fond oprav', 'poistenie', 'allianz', 'generali', 'kooperativa', 'union']],
+  ['subs', ['netflix', 'spotify', 'apple.com', 'apple com', 'icloud', 'google', 'youtube', 'disney', 'hbo', 'max.com', 'amazon prime', 'orange', 'telekom', 'o2 ', 'swan', '4ka', 'chatgpt', 'openai', 'anthropic', 'claude', 'microsoft', 'adobe', 'patreon']],
   ['invest', ['xtb', 'trading 212', 'trading212', 'revolut invest', 'finax', 'portu', 'etf', 'sporenie', 'sporiaci', 'dds', 'doplnkov', 'nn ', 'investic', 'binance', 'coinbase', 'anycoin']],
   ['income', ['mzda', 'vyplata', 'plat ', 'salary', 'odmena', 'dividend', 'urok', 'vratka', 'refund', 'prijata platba']],
   ['transfer', ['ucet *', 'prevod', 'vlastny ucet', 'medzi uctami', 'vyber atm', 'bankomat', 'atm ', 'revolut top', 'top-up', 'dobitie']],
@@ -101,6 +105,7 @@ function sanitizeTx(t) {
     source: String(t.source || 'manual'),
     createdAt: Number(t.createdAt) || Date.now(),
     snoozedAt: Number(t.snoozedAt) || 0,
+    oneOff: Boolean(t.oneOff), // ⭐ jednorazový výdavok (štítok nezávislý od kategórie)
   };
 }
 
@@ -344,12 +349,14 @@ export const store = {
 export function monthStats(month) {
   const byCat = Object.fromEntries(CATEGORIES.map(c => [c.id, 0]));
   let count = 0;
+  let oneOff = 0;
   for (const t of state.transactions) {
     if (t.status !== 'approved' || !t.date.startsWith(month)) continue;
     count++;
     const c = CAT[t.category];
     if (c.kind === 'income') byCat[c.id] += t.amount;
     else byCat[c.id] += -t.amount;
+    if (t.oneOff && (c.kind === 'variable' || c.kind === 'fixed')) oneOff += -t.amount;
   }
   for (const k in byCat) byCat[k] = round2(byCat[k]);
   const sumKind = kind => round2(CATEGORIES.filter(c => c.kind === kind).reduce((s, c) => s + byCat[c.id], 0));
@@ -360,7 +367,7 @@ export function monthStats(month) {
   const expenses = round2(variable + fixed);
   const balance = round2(income - expenses - invest);
   const pending = state.transactions.filter(t => t.status === 'pending' && t.date.startsWith(month)).length;
-  return { month, byCat, income, variable, fixed, invest, expenses, balance, count, pending,
+  return { month, byCat, income, variable, fixed, invest, expenses, balance, count, pending, oneOff: round2(oneOff),
     savingsRate: income > 0 ? (income - expenses) / income : null };
 }
 

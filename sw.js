@@ -1,5 +1,5 @@
 /* Service worker — offline app shell. Pri zmene súborov zvýš VERSION. */
-const VERSION = 'financie-v14';
+const VERSION = 'financie-v15';
 const SHELL = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/store.js', './js/parser.js', './js/export.js', './js/ui.js',
