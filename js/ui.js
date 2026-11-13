@@ -55,7 +55,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '19';
+const APP_VERSION = '20';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -263,7 +263,7 @@ function accountsHTML() {
     return `
       <button class="dash-budget dash-budget--empty" data-action="accounts">
         <span>🏦 <b>Zadať zostatky účtov</b></span>
-        <span class="muted small">Uvidíš aktuálny stav hlavného a sporiaceho účtu</span>
+        <span class="muted small">Uvidíš aktuálny stav hlavného účtu a sporenia</span>
       </button>`;
   }
   const days = Math.floor((Date.now() - a.updatedAt) / 86400000);
@@ -272,7 +272,7 @@ function accountsHTML() {
     <button class="dash-budget dash-accounts" data-action="accounts" aria-label="Upraviť zostatky účtov">
       <span class="acc-grid">
         ${a.main ? tile(`${esc(a.main.name || 'Hlavný účet')}${a.mainDelta ? ' ≈' : ''}`, fmtShort(a.mainNow)) : ''}
-        ${a.accounts.filter(x => x.kind === 'savings').map(x => tile(esc(x.name), fmtShort(x.balance))).join('')}
+        ${a.accounts.some(x => x.kind === 'savings') ? tile('Sporenie', fmtShort(a.savings)) : ''}
       </span>
       ${a.main && a.savings ? `<span class="dash-budget__row small"><span class="muted">Spolu</span><b class="num">${fmt(a.liquid)}</b></span>` : ''}
       <span class="dash-budget__hint">${days > 30 ? '⚠️ ' : ''}Zostatky zadané ${days === 0 ? 'dnes' : days === 1 ? 'včera' : `pred ${plural(days, 'dňom', 'dňami', 'dňami')}`}${a.mainDelta ? ` · bežný účet dopočítaný o ${fmtSigned(a.mainDelta)} z nových platieb` : ''}</span>
@@ -282,6 +282,7 @@ function accountsHTML() {
 // Zobrazujú sa len tieto účty (ostatné, ak boli zadané skôr, sa ignorujú)
 const DEFAULT_ACCOUNTS = [
   { id: 'main', name: 'Hlavný účet', kind: 'main' },
+  { id: 'sec', name: 'Sekundárny účet', kind: 'savings' },
   { id: 'sav', name: 'Sporiaci účet', kind: 'savings' },
 ];
 const ACCOUNT_IDS = DEFAULT_ACCOUNTS.map(a => a.id);
@@ -293,7 +294,7 @@ function openAccountsSheet() {
   openSheet({
     title: 'Zostatky účtov',
     html: `
-      <p class="muted small" style="margin:0 4px 12px">Opíš zostatky z appky ČSOB (Moje produkty). Hlavný účet sa potom sám dopočítava podľa nových platieb, sporiaci aktualizuj, keď chceš.</p>
+      <p class="muted small" style="margin:0 4px 12px">Opíš zostatky z appky ČSOB (Moje produkty). Hlavný účet sa potom sám dopočítava podľa nových platieb. Sekundárny a sporiaci účet sa zobrazia spolu ako <b>Sporenie</b>.</p>
       ${a?.mainDelta ? `<p class="small" style="margin:0 4px 12px">Hlavný účet podľa appky teraz: <b class="num">${fmt(a.mainNow)}</b>. Ak ČSOB ukazuje inú sumu, chýba nejaká platba alebo príde neskôr.</p>` : ''}
       <form id="acc-form" autocomplete="off">
         ${list.map(x => `
@@ -1040,7 +1041,7 @@ function openSettings() {
           <span class="switch" aria-hidden="true"></span>
         </button>
         ${row('budget', '🎯', 'Mesačný rozpočet', Number(store.state.settings.budget) ? fmtShort(store.state.settings.budget) : 'Nenastavený')}
-        ${row('accounts', '🏦', 'Zostatky účtov', accountsSummary(ACCOUNT_IDS) ? `Hlavný + sporiaci: ${fmt(accountsSummary(ACCOUNT_IDS).liquid)}` : 'Nezadané')}
+        ${row('accounts', '🏦', 'Zostatky účtov', accountsSummary(ACCOUNT_IDS) ? `Hlavný účet + sporenie: ${fmt(accountsSummary(ACCOUNT_IDS).liquid)}` : 'Nezadané')}
       </div>
 
       <div class="section-title">Pravidlá</div>
