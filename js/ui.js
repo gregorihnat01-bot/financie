@@ -5,7 +5,7 @@
  * UI nikdy nedrží vlastnú kópiu transakcií, preto nemôže "zostať visieť" stará položka v inboxe.
  */
 
-import { store, CATEGORIES, CAT, monthStats, shiftMonth, merchantKey, todayISO } from './store.js';
+import { store, CATEGORIES, CAT, monthStats, monthInsights, shiftMonth, merchantKey, todayISO } from './store.js';
 import { parseFile, parseText, extractTransactions } from './parser.js';
 import { periodRange, shiftPeriod, collect, buildCsv, buildXlsx, deliver, fileName } from './export.js';
 
@@ -55,7 +55,7 @@ const ui = {
   focusId: null,
 };
 
-const APP_VERSION = '16';
+const APP_VERSION = '17';
 
 const TITLES = { inbox: 'Schváliť', overview: 'Prehľad', tx: 'Transakcie' };
 
@@ -107,19 +107,14 @@ function renderInbox() {
 
   if (!list.length) {
     view.innerHTML = `
-      <div class="empty">
-        <div class="empty__icon">✓</div>
-        <h2>Všetko vyriešené</h2>
-        <p>Žiadne platby nečakajú na schválenie.</p>
-        <div class="row">
-          ${gmailConnected()
-            ? '<button class="btn" data-action="gmail-sync">↻ Skontrolovať Gmail</button>'
-            : '<button class="btn" data-action="paste">📋 Zo schránky</button>'}
-          <button class="btn" data-action="import">📥 Import</button>
-        </div>
-        ${gmailStatusLine()}
+      <div class="all-clear">
+        <span class="all-clear__check">✓</span>
+        <span><b>Všetko schválené</b><span class="muted"> · ${esc(gmailConnected() ? gmailLastText() : 'žiadne platby nečakajú')}</span></span>
       </div>
-      ${recentApprovedHTML()}`;
+      ${quickActionsHTML()}
+      ${dashboardHTML()}
+      ${recentApprovedHTML()}
+      ${gmailConnected() ? `<p class="muted small" style="text-align:center;margin-top:18px">v${APP_VERSION}</p>` : ''}`;
     return;
   }
 
@@ -157,10 +152,167 @@ function renderInbox() {
           }).join('')}
           ${list.length > 8 ? `<div class="list-row muted small">+ ďalších ${list.length - 8}</div>` : ''}
         </div>
-      </div>` : ''}`;
+      </div>` : ''}
+    <div class="section-title">Tento mesiac</div>
+    ${quickActionsHTML()}
+    ${dashboardHTML()}`;
 
   bindSwipe($('.card', view));
 }
+
+/* ---------- Rýchle akcie ---------- */
+function quickActionsHTML() {
+  const gmail = gmailConnected();
+  const qa = (action, icon, label, extra = '') => `
+    <button class="qa" data-action="${action}" ${extra}>
+      <span class="qa__icon" aria-hidden="true">${icon}</span><span class="qa__label">${label}</span>
+    </button>`;
+  return `<div class="quick-actions">
+    ${qa('quick-add', '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>', 'Pridať')}
+    ${gmail ? qa('gmail-sync', '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>', 'Gmail')
+            : qa('gmail-setup', '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>', 'Gmail')}
+    ${qa('paste', '<svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>', 'Vložiť')}
+    ${qa('quick-export', '<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>', 'Export')}
+  </div>`;
+}
+
+/* ---------- Mini-dashboard ---------- */
+const MONTHS_SK = ['január', 'február', 'marec', 'apríl', 'máj', 'jún', 'júl', 'august', 'september', 'október', 'november', 'december'];
+const MONTHS_LOC = ['januári', 'februári', 'marci', 'apríli', 'máji', 'júni', 'júli', 'auguste', 'septembri', 'októbri', 'novembri', 'decembri'];
+
+function dashboardHTML() {
+  const ins = monthInsights();
+  const monthIdx = Number(ins.month.slice(5, 7)) - 1;
+  const budget = Number(store.state.settings.budget) || 0;
+  const spent = ins.expenses;
+
+  // Rozpočet: plnenie + tempo (kde by si mal byť pri rovnomernom míňaní)
+  let budgetHTML;
+  if (budget > 0) {
+    const pct = Math.min(100, (spent / budget) * 100);
+    const pace = Math.min(100, (ins.dayNow / ins.daysInMonth) * 100);
+    const left = budget - spent;
+    const state = spent > budget ? 'over' : pct > pace + 8 ? 'warn' : 'ok';
+    const hint = left >= 0
+      ? `Zostáva <b class="num">${fmt(left)}</b> · ${ins.daysLeft > 0 ? `${fmt(left / ins.daysLeft)}/deň na ${plural(ins.daysLeft, 'deň', 'dni', 'dní')}` : 'koniec mesiaca'}`
+      : `Rozpočet prekročený o <b class="num">${fmt(-left)}</b>`;
+    budgetHTML = `
+      <button class="dash-budget dash-budget--${state}" data-action="budget" aria-label="Upraviť mesačný rozpočet">
+        <span class="dash-budget__row"><span class="muted">Rozpočet</span><span><b class="num">${fmtShort(spent)}</b> <span class="muted">z ${fmtShort(budget)}</span></span></span>
+        <span class="meter" role="img" aria-label="Minuté ${Math.round(pct)} % rozpočtu">
+          <i style="width:${pct}%"></i><span class="meter__pace" style="left:${pace}%" title="Kde by si mal byť dnes"></span>
+        </span>
+        <span class="dash-budget__hint">${hint}</span>
+      </button>`;
+  } else {
+    budgetHTML = `
+      <button class="dash-budget dash-budget--empty" data-action="budget">
+        <span>🎯 <b>Nastaviť mesačný rozpočet</b></span>
+        <span class="muted small">${ins.suggestedBudget ? `Návrh podľa posledných mesiacov: ${fmtShort(ins.suggestedBudget)}` : 'Uvidíš, koľko ti ešte zostáva na každý deň'}</span>
+      </button>`;
+  }
+
+  // Rozdelenie výdavkov (top kategórie)
+  const spend = CATEGORIES.filter(c => c.kind === 'variable' || c.kind === 'fixed')
+    .map(c => ({ c, v: ins.byCat[c.id] })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+  const catsHTML = spend.length ? `
+    <div class="stackbar dash-stack" role="img" aria-label="Rozdelenie výdavkov">
+      ${spend.map(x => `<span class="stackbar__seg" style="--c:${x.c.color};flex:${x.v}"></span>`).join('')}
+    </div>
+    <div class="dash-legend">
+      ${spend.slice(0, 4).map(x => `<span><i class="swatch" style="--c:${x.c.color}"></i>${esc(x.c.short)} <b class="num">${fmtShort(x.v)}</b></span>`).join('')}
+    </div>` : '';
+
+  // Fun facts
+  const facts = [];
+  if (ins.dayNow && ins.variableNow > 0) facts.push(['⌀', fmt(ins.avgDaily), 'denne na bežné veci']);
+  if (ins.isCurrent) facts.push(['🌿', plural(ins.noSpendDays, 'deň', 'dni', 'dní'), `bez nákupov a zábavy z ${ins.dayNow}`]);
+  if (ins.prevVariable) {
+    const diff = (ins.variableNow - ins.prevVariable) / ins.prevVariable * 100;
+    facts.push([diff <= 0 ? '📉' : '📈', `${diff > 0 ? '+' : '−'}${Math.abs(Math.round(diff))} %`, `oproti ${MONTHS_LOC[(monthIdx + 11) % 12]} k ${ins.dayNow}. dňu`]);
+  }
+  if (ins.biggest) facts.push(['🏆', fmt(-ins.biggest.amount), `najväčší: ${ins.biggest.merchant}`]);
+
+  const cf = ins.balance;
+  return `
+    <section class="glass dash" aria-label="Rýchly prehľad mesiaca">
+      <button class="dash-hero" data-action="goto-overview">
+        <span class="dash-hero__top">
+          <span class="muted">${MONTHS_SK[monthIdx][0].toUpperCase() + MONTHS_SK[monthIdx].slice(1)} · cash-flow</span>
+          ${ins.isCurrent ? `<span class="dash-today">Dnes ${ins.todaySpent ? `−${fmt(ins.todaySpent)}` : '0 €'}</span>` : ''}
+        </span>
+        <span class="dash-hero__value num ${cf >= 0 ? 'pos' : ''}">${fmtSigned(cf)}</span>
+        <span class="dash-hero__sub">
+          <span>Príjmy <b class="num pos">${fmtShort(ins.income)}</b></span>
+          <span>Výdavky <b class="num">${fmtShort(spent)}</b></span>
+          ${ins.invest ? `<span>Investované <b class="num">${fmtShort(ins.invest)}</b></span>` : ''}
+        </span>
+      </button>
+      ${budgetHTML}
+      ${catsHTML}
+    </section>
+    ${facts.length ? `<div class="facts">${facts.slice(0, 4).map(([icon, value, label]) => `
+      <div class="glass fact"><span class="fact__icon" aria-hidden="true">${icon}</span><span class="fact__value num">${esc(value)}</span><span class="fact__label">${esc(label)}</span></div>`).join('')}</div>` : ''}`;
+}
+
+function openBudgetSheet() {
+  const ins = monthInsights();
+  const current = Number(store.state.settings.budget) || 0;
+  openSheet({
+    title: 'Mesačný rozpočet',
+    html: `
+      <p class="muted small" style="margin:0 4px 12px">Koľko chceš mesačne minúť na všetky výdavky (bez investícií a presunov). Widget ti potom ukáže, koľko ešte zostáva na každý deň.</p>
+      <label class="field"><input class="input input--amount num" id="budget-input" inputmode="decimal" placeholder="${ins.suggestedBudget || 1000} €" value="${current || ''}"></label>
+      ${ins.suggestedBudget ? `<button class="btn btn--block btn--sm" id="budget-suggest" style="margin-bottom:10px">Použiť návrh ${fmtShort(ins.suggestedBudget)} (priemer posledných mesiacov)</button>` : ''}
+      <button class="btn btn--primary btn--block" id="budget-save">Uložiť rozpočet</button>
+      ${current ? '<button class="btn btn--danger btn--block" style="margin-top:10px" id="budget-off">Zrušiť rozpočet</button>' : ''}`,
+    onMount(sheet, close) {
+      const input = $('#budget-input', sheet);
+      $('#budget-suggest', sheet)?.addEventListener('click', () => { input.value = ins.suggestedBudget; });
+      $('#budget-save', sheet).addEventListener('click', () => {
+        const v = parseFloat(String(input.value).replace(/\s|€/g, '').replace(',', '.'));
+        if (!Number.isFinite(v) || v <= 0) { toast('Zadaj sumu rozpočtu'); return; }
+        store.setSetting('budget', Math.round(v * 100) / 100);
+        haptic('success');
+        close();
+        toast(`🎯 Rozpočet ${fmtShort(v)} mesačne`);
+      });
+      $('#budget-off', sheet)?.addEventListener('click', () => { store.setSetting('budget', 0); close(); toast('Rozpočet zrušený'); });
+      setTimeout(() => input.focus(), 350);
+    },
+  });
+}
+
+/* ---------- Haptická odozva ----------
+ * Android: navigator.vibrate. iPhone: Safari Vibration API nepodporuje — iOS 18+ však pri
+ * prepnutí systémového prepínača (<input type="checkbox" switch>) zahrá jemný haptický „tik“.
+ */
+const haptic = (() => {
+  let label = null;
+  const iosTick = () => {
+    if (!label) {
+      label = document.createElement('label');
+      label.setAttribute('aria-hidden', 'true');
+      label.style.cssText = 'position:fixed;left:-200px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('switch', '');
+      input.tabIndex = -1;
+      label.appendChild(input);
+      document.body.appendChild(label);
+    }
+    label.click();
+  };
+  const PATTERN = { light: 8, medium: 14, success: [10, 50, 16], warning: [20, 60, 20] };
+  return (kind = 'light') => {
+    if (store.state.settings.haptics === false) return;
+    try {
+      if (typeof navigator.vibrate === 'function') { navigator.vibrate(PATTERN[kind] || 8); return; }
+      iosTick();
+      if (kind === 'success' || kind === 'warning') setTimeout(iosTick, 110);
+    } catch { /* haptika je len bonus */ }
+  };
+})();
 
 function cardHTML(t, s) {
   const c = CAT[s.category];
@@ -212,6 +364,7 @@ function approveTx(id, category, cardEl, dir = 1) {
   const prevRule = store.state.rules[key] || null;
   if (cardEl) flyOut(cardEl, dir);
   if (ui.focusId === id) ui.focusId = null;
+  haptic('success');
 
   store.approve(id, category); // ← uloží do LocalStorage, naučí pravidlo, okamžite prekreslí inbox
 
@@ -280,6 +433,9 @@ function bindSwipe(card) {
     dx = mx;
     card.style.transform = `translateX(${dx}px) rotate(${dx / 22}deg)`;
     const p = Math.min(1, Math.abs(dx) / THRESHOLD);
+    // jemný tik pri prekročení prahu (ako v iOS appkách)
+    const armed = Math.abs(dx) > THRESHOLD;
+    if (armed !== card._armed) { card._armed = armed; if (armed) haptic('light'); }
     yes.style.opacity = dx > 0 ? p : 0;
     no.style.opacity = dx < 0 ? p : 0;
   });
@@ -469,8 +625,74 @@ function txRowHTML(t) {
   </button>`;
 }
 
+/* ---------- Inteligentné vyhľadávanie ----------
+ * „lidl“            → obchodník / poznámka
+ * „šport“, „nákupy“ → kategória          „>50“, „nad 50“, „20-80“, „do 10“ → rozsah sumy
+ * „september“, „okt 2026“ → mesiac      „príjem“, „výdavky“, „čaká“, „jednorazové“ → typ / stav
+ * Všetky podmienky musia platiť naraz (napr. „šport >20 október“).
+ */
+const normText = v => String(v ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const MONTH_FULL = ['januar', 'februar', 'marec', 'april', 'maj', 'jun', 'jul', 'august', 'september', 'oktober', 'november', 'december'];
+const parseNum = v => parseFloat(String(v).replace(',', '.'));
+
+function parseQuery(raw) {
+  const f = { text: [], cats: new Set(), min: null, max: null, months: new Set(), type: null, pending: false, oneOff: false };
+  const q = normText(raw).replace(/€|eur\b/g, ' ').replace(/(\d)\s*-\s*(\d)/g, '$1-$2').replace(/([<>]=?)\s+(\d)/g, '$1$2');
+  const tokens = q.split(/\s+/).filter(Boolean);
+  let year = null;
+  const monthIdx = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i], next = tokens[i + 1];
+    const NUM = /^\d+(?:[.,]\d+)?$/;
+    let m;
+    if ((m = /^(>=?|<=?)(\d+(?:[.,]\d+)?)$/.exec(t))) { m[1][0] === '>' ? (f.min = parseNum(m[2])) : (f.max = parseNum(m[2])); continue; }
+    if ((m = /^(\d+(?:[.,]\d+)?)(?:-|\.\.)(\d+(?:[.,]\d+)?)$/.exec(t))) { f.min = parseNum(m[1]); f.max = parseNum(m[2]); continue; }
+    if (['nad', 'od', 'viac', 'aspon', 'min'].includes(t) && next && NUM.test(next)) { f.min = parseNum(next); i++; continue; }
+    if (['pod', 'do', 'menej', 'max'].includes(t) && next && NUM.test(next)) { f.max = parseNum(next); i++; continue; }
+    if (/^20\d\d$/.test(t)) { year = t; continue; }
+    if (t.length >= 3) {
+      // „sep“, „sept“, „september“ áno — „decathlon“ nie (token musí byť začiatkom názvu mesiaca)
+      const mi = MONTH_FULL.findIndex(k => k.startsWith(t) || (t.length > k.length && t.startsWith(k) && /^(a|i|e|om|och)?$/.test(t.slice(k.length))));
+      if (mi >= 0) { monthIdx.push(mi); continue; }
+    }
+    if (/^(prijm|prijem|mzd|vyplat)/.test(t)) { f.cats.add('income'); continue; }
+    if (/^(vydav|vydaj)/.test(t)) { f.type = 'out'; continue; }
+    if (/^cak/.test(t)) { f.pending = true; continue; }
+    if (/^(jednoraz|⭐)/.test(t)) { f.oneOff = true; continue; }
+    if (t.length >= 3) {
+      const cat = CATEGORIES.find(c => c.id !== 'income' && (normText(c.short).startsWith(t) || normText(c.name).split(/[^a-z]+/).some(w => w.length >= 3 && w.startsWith(t))));
+      if (cat) { f.cats.add(cat.id); continue; }
+    }
+    f.text.push(t);
+  }
+  const now = todayISO();
+  for (const mi of monthIdx) {
+    let y = year || now.slice(0, 4);
+    const key = `${y}-${String(mi + 1).padStart(2, '0')}`;
+    if (!year && key > now.slice(0, 7)) y = String(Number(y) - 1); // „december“ v novembri = minulý rok
+    f.months.add(`${y}-${String(mi + 1).padStart(2, '0')}`);
+  }
+  if (year && !monthIdx.length) f.year = year;
+  return f;
+}
+
+function queryChips(f) {
+  const chips = [];
+  for (const id of f.cats) chips.push(`${CAT[id].icon} ${CAT[id].short}`);
+  if (f.min != null && f.max != null) chips.push(`💶 ${fmt(f.min)} – ${fmt(f.max)}`);
+  else if (f.min != null) chips.push(`💶 nad ${fmt(f.min)}`);
+  else if (f.max != null) chips.push(`💶 do ${fmt(f.max)}`);
+  for (const m of f.months) chips.push(`📅 ${monthLabel(m)}`);
+  if (f.year) chips.push(`📅 rok ${f.year}`);
+  if (f.type) chips.push(f.type === 'in' ? '↓ Príjmy' : '↑ Výdavky');
+  if (f.pending) chips.push('⚡ Čaká');
+  if (f.oneOff) chips.push('⭐ Jednorazové');
+  for (const t of f.text) chips.push(`🔍 „${t}“`);
+  return chips;
+}
+
 function filteredTx() {
-  const q = ui.txQuery.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const fq = parseQuery(ui.txQuery);
   const f = ui.txFilter;
   return store.state.transactions
     .filter(t => {
@@ -479,10 +701,19 @@ function filteredTx() {
       if (f === 'pending' && t.status !== 'pending') return false;
       if (f === 'oneoff' && !t.oneOff) return false;
       if (f.startsWith('cat:') && t.category !== f.slice(4)) return false;
-      if (!q) return true;
-      const hay = `${t.merchant} ${t.note} ${t.category ? CAT[t.category].name : ''} ${t.amount.toFixed(2)} ${t.amount.toFixed(2).replace('.', ',')}`
-        .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-      return hay.includes(q);
+      if (fq.cats.size && !fq.cats.has(t.category)) return false;
+      const abs = Math.abs(t.amount);
+      if (fq.min != null && abs < fq.min) return false;
+      if (fq.max != null && abs > fq.max) return false;
+      if (fq.months.size && !fq.months.has(t.date.slice(0, 7))) return false;
+      if (fq.year && !t.date.startsWith(fq.year)) return false;
+      if (fq.type === 'in' && t.amount <= 0) return false;
+      if (fq.type === 'out' && t.amount >= 0) return false;
+      if (fq.pending && t.status !== 'pending') return false;
+      if (fq.oneOff && !t.oneOff) return false;
+      if (!fq.text.length) return true;
+      const hay = normText(`${t.merchant} ${t.note} ${t.category ? CAT[t.category].name : ''} ${t.amount.toFixed(2)} ${t.amount.toFixed(2).replace('.', ',')}`);
+      return fq.text.every(w => hay.includes(w));
     })
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
 }
@@ -492,7 +723,8 @@ function renderTxList() {
   const box = $('#tx-list');
   const all = filteredTx();
   if (!all.length) {
-    box.innerHTML = `<div class="empty" style="padding-top:40px"><h2>Nič sa nenašlo</h2><p>${store.state.transactions.length ? 'Skús iný filter alebo hľadaný výraz.' : 'Zatiaľ žiadne transakcie. Importuj e-mail alebo PDF výpis.'}</p></div>`;
+    const chips = ui.txQuery.trim() ? queryChips(parseQuery(ui.txQuery)) : [];
+    box.innerHTML = `${chips.length ? `<div class="query-chips">${chips.map(c => `<span class="query-chip">${esc(c)}</span>`).join('')}</div>` : ''}<div class="empty" style="padding-top:40px"><h2>Nič sa nenašlo</h2><p>${store.state.transactions.length ? 'Skús iný filter alebo hľadaný výraz.' : 'Zatiaľ žiadne transakcie. Importuj e-mail alebo PDF výpis.'}</p></div>`;
     return;
   }
   const list = all.slice(0, ui.txLimit);
@@ -503,7 +735,9 @@ function renderTxList() {
     else groups.push({ date: t.date, items: [t] });
   }
   const total = all.reduce((s, t) => s + t.amount, 0);
+  const chips = ui.txQuery.trim() ? queryChips(parseQuery(ui.txQuery)) : [];
   box.innerHTML = `
+    ${chips.length ? `<div class="query-chips" aria-label="Rozpoznaný filter">${chips.map(c => `<span class="query-chip">${esc(c)}</span>`).join('')}</div>` : ''}
     <div class="muted small" style="margin:10px 6px 0">${plural(all.length, 'transakcia', 'transakcie', 'transakcií')} · spolu <span class="num">${fmtSigned(total)}</span></div>
     ${groups.map(g => `
       <div class="day-head"><span>${esc(fmtDay(g.date, true))}</span><span class="num">${fmtSigned(g.items.reduce((s, t) => s + t.amount, 0))}</span></div>
@@ -693,6 +927,7 @@ function openEditSheet(id) {
 }
 
 function deleteTx(id) {
+  haptic('warning');
   const removed = store.remove(id);
   if (removed) toast('Platba zmazaná', { label: 'Späť', fn: () => store.restore(removed) });
 }
@@ -723,6 +958,16 @@ function openSettings() {
         ${row('install', '📲', 'Pridať na plochu', 'Appka bez lišty prehliadača')}
       </div>
 
+      <div class="section-title">Appka</div>
+      <div class="glass list settings-group">
+        <button type="button" class="list-row" role="switch" id="set-haptics" aria-checked="${store.state.settings.haptics !== false}">
+          <span class="list-row__icon" style="--c:#8e8e93">📳</span>
+          <span class="list-row__main"><span class="list-row__title">Haptická odozva</span><span class="list-row__sub">Jemné ťuknutia pri ovládaní (iPhone s iOS 18+, Android)</span></span>
+          <span class="switch" aria-hidden="true"></span>
+        </button>
+        ${row('budget', '🎯', 'Mesačný rozpočet', Number(store.state.settings.budget) ? fmtShort(store.state.settings.budget) : 'Nenastavený')}
+      </div>
+
       <div class="section-title">Pravidlá</div>
       <div class="glass list settings-group">
         ${row('rules', '🧠', 'Naučené pravidlá', plural(rules, 'pravidlo', 'pravidlá', 'pravidiel'))}
@@ -738,11 +983,18 @@ function openSettings() {
       </div>
       <p class="muted small" style="margin:16px 4px 0;text-align:center">Dáta sú uložené len v tomto zariadení (LocalStorage).<br>Nikam sa neposielajú.<br>Verzia ${APP_VERSION}</p>`,
     onMount(sheet, close) {
+      $('#set-haptics', sheet).addEventListener('click', e => {
+        const on = e.currentTarget.getAttribute('aria-checked') !== 'true';
+        store.setSetting('haptics', on);
+        e.currentTarget.setAttribute('aria-checked', String(on));
+        if (on) haptic('success');
+      });
       sheet.addEventListener('click', e => {
         const b = e.target.closest('[data-action]');
         if (!b) return;
         const a = b.dataset.action;
         if (a === 'gmail') openGmailSheet();
+        else if (a === 'budget') openBudgetSheet();
         else if (a === 'import') { close(); $('#file-input').click(); }
         else if (a === 'paste') { close(); pasteFromClipboard(); }
         else if (a === 'paste-manual') openPasteSheet();
@@ -1396,6 +1648,15 @@ function toast(msg, action) {
  *  Globálne eventy (delegácia — viazané iba raz)
  * ========================================================================= */
 function bindEvents() {
+  // Jemná haptika pri ťuknutí (schválenie a mazanie majú vlastnú, výraznejšiu)
+  document.addEventListener('click', e => {
+    const el = e.target.closest('button, .chip, [role="switch"]');
+    if (!el || el.disabled) return;
+    const a = el.dataset.action;
+    if (a === 'approve' || a === 'delete' || el.id === 'edit-delete') return;
+    haptic('light');
+  }, true);
+
   $('.tabbar').addEventListener('click', e => {
     const t = e.target.closest('.tab');
     if (t) setTab(t.dataset.tab);
@@ -1422,6 +1683,11 @@ function bindEvents() {
       }
       case 'paste': pasteFromClipboard(); break;
       case 'gmail-sync': syncGmail({ manual: true }); break;
+      case 'gmail-setup': openGmailSheet(); break;
+      case 'quick-add': openAddSheet(); break;
+      case 'quick-export': openExportSheet({ kind: 'month', anchor: todayISO() }); break;
+      case 'budget': openBudgetSheet(); break;
+      case 'goto-overview': ui.month = todayISO().slice(0, 7); setTab('overview'); break;
       case 'import': $('#file-input').click(); break;
       case 'edit-tx': openEditSheet(id); break;
     }

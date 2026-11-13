@@ -378,3 +378,70 @@ export function shiftMonth(month, delta) {
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+
+/* ---------- Mini-dashboard (obrazovka Schváliť) ---------- */
+
+const DISCRETIONARY = new Set(['fun', 'shopping']); // „zbytočné“ výdavky pre počítadlo dní bez míňania
+
+/**
+ * Štatistiky mesiaca pre widget: denná útrata, dni bez nákupov a zábavy, najväčší výdavok,
+ * porovnanie s minulým mesiacom k rovnakému dňu a odporúčaný rozpočet.
+ */
+export function monthInsights(month = todayISO().slice(0, 7)) {
+  const st = monthStats(month);
+  const today = todayISO();
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const isCurrent = today.startsWith(month);
+  const dayNow = isCurrent ? Number(today.slice(8, 10)) : daysInMonth;
+
+  const daily = Array(daysInMonth).fill(0);
+  const discretionaryDays = new Set();
+  let variable = 0;
+  let biggest = null;
+  for (const t of state.transactions) {
+    if (t.status !== 'approved' || !t.date.startsWith(month) || t.amount >= 0) continue;
+    const c = CAT[t.category];
+    if (c.kind !== 'variable' && c.kind !== 'fixed') continue;
+    const day = Number(t.date.slice(8, 10));
+    daily[day - 1] += -t.amount;
+    if (c.kind === 'variable' && !t.oneOff) variable += -t.amount;
+    if (DISCRETIONARY.has(t.category)) discretionaryDays.add(day);
+    if (!biggest || t.amount < biggest.amount) biggest = t;
+  }
+  let noSpendDays = 0;
+  for (let d = 1; d <= dayNow; d++) if (!discretionaryDays.has(d)) noSpendDays++;
+
+  // Minulý mesiac k rovnakému dňu (bežné voľné výdavky, bez jednorazových)
+  const prevMonth = shiftMonth(month, -1);
+  let prevVariable = 0;
+  let prevHasData = false;
+  for (const t of state.transactions) {
+    if (t.status !== 'approved' || !t.date.startsWith(prevMonth)) continue;
+    prevHasData = true;
+    const c = CAT[t.category];
+    if (c.kind !== 'variable' || t.oneOff || t.amount >= 0) continue;
+    if (Number(t.date.slice(8, 10)) <= dayNow) prevVariable += -t.amount;
+  }
+
+  // Odporúčaný rozpočet = priemer výdavkov za posledné 3 mesiace s dátami (bez jednorazových), zaokrúhlený na 50 €
+  const past = [1, 2, 3].map(i => monthStats(shiftMonth(month, -i))).filter(s => s.count > 0);
+  const suggestedBudget = past.length
+    ? Math.max(50, Math.round(past.reduce((s, x) => s + x.expenses - x.oneOff, 0) / past.length / 50) * 50)
+    : null;
+
+  return {
+    ...st,
+    daysInMonth, dayNow, isCurrent,
+    daysLeft: daysInMonth - dayNow + (isCurrent ? 1 : 0),
+    todaySpent: isCurrent ? round2(daily[dayNow - 1]) : 0,
+    daily: daily.map(round2),
+    avgDaily: dayNow ? round2(variable / dayNow) : 0,
+    noSpendDays,
+    biggest,
+    prevMonth,
+    prevVariable: prevHasData ? round2(prevVariable) : null,
+    variableNow: round2(variable),
+    suggestedBudget,
+  };
+}

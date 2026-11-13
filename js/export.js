@@ -138,7 +138,8 @@ export function collect(range, { includePending = true } = {}) {
  *  CSV (Excel SK: ";" + desatinná čiarka + UTF-8 BOM)
  * ========================================================================= */
 
-const HEAD = ['Dátum', 'Deň', 'Obchodník', 'Kategória', 'Skupina', 'Typ', 'Suma (€)', 'Výdavok (€)', 'Príjem (€)', 'Stav', 'Jednorazový', 'Poznámka', 'Zdroj'];
+// Hlavné stĺpce na začiatku (Dátum, Obchodník, Kategória, Typ, Suma, Poznámka), doplnkové za nimi
+const HEAD = ['Dátum', 'Obchodník', 'Kategória', 'Typ', 'Suma (€)', 'Poznámka', 'Skupina', 'Výdavok (€)', 'Príjem (€)', 'Stav', 'Jednorazový', 'Deň', 'Zdroj'];
 
 const csvNum = n => (n === 0 ? '0' : n.toFixed(2).replace('.', ','));
 function csvCell(v) {
@@ -150,7 +151,7 @@ function csvCell(v) {
 export function buildCsv(data) {
   const lines = [HEAD.join(';')];
   for (const r of data.rows) {
-    lines.push([skDate(r.date), r.day, r.merchant, r.category, r.group, r.type, csvNum(r.amount), csvNum(r.expense), csvNum(r.income), r.status, r.oneOff, r.note, r.source].map(csvCell).join(';'));
+    lines.push([skDate(r.date), r.merchant, r.category, r.type, csvNum(r.amount), r.note, r.group, csvNum(r.expense), csvNum(r.income), r.status, r.oneOff, r.day, r.source].map(csvCell).join(';'));
   }
   return new Blob(['﻿' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
 }
@@ -194,12 +195,12 @@ export async function buildXlsx(data) {
   const { rows, summary, range } = data;
 
   /* Hárok 1: Transakcie */
-  const aoa = [HEAD, ...rows.map(r => [parseISO(r.date), r.day, r.merchant, r.category, r.group, r.type, r.amount, r.expense || null, r.income || null, r.status, r.oneOff, r.note, r.source])];
+  const aoa = [HEAD, ...rows.map(r => [parseISO(r.date), r.merchant, r.category, r.type, r.amount, r.note, r.group, r.expense || null, r.income || null, r.status, r.oneOff, r.day, r.source])];
   const last = aoa.length;
   aoa.push([], ['Spolu']);
   const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
   const sum = key => rows.reduce((t, r) => t + r[key], 0);
-  putSum(ws, XLSX, last + 1, 6, 2, last, sum('amount'));
+  putSum(ws, XLSX, last + 1, 4, 2, last, sum('amount'));
   putSum(ws, XLSX, last + 1, 7, 2, last, sum('expense'));
   putSum(ws, XLSX, last + 1, 8, 2, last, sum('income'));
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: last + 1, c: HEAD.length - 1 } });
@@ -207,8 +208,8 @@ export async function buildXlsx(data) {
     const c = ws[XLSX.utils.encode_cell({ r, c: 0 })];
     if (c) c.z = 'd. m. yyyy';
   }
-  for (const col of [6, 7, 8]) setFormat(ws, XLSX, col, EUR, 1, last - 1);
-  ws['!cols'] = [12, 10, 30, 24, 14, 11, 12, 12, 12, 11, 12, 28, 11].map(wch => ({ wch }));
+  for (const col of [4, 7, 8]) setFormat(ws, XLSX, col, EUR, 1, last - 1);
+  ws['!cols'] = [12, 30, 24, 11, 12, 30, 14, 12, 12, 11, 12, 10, 12].map(wch => ({ wch }));
   ws['!autofilter'] = { ref: `A1:M${Math.max(1, last)}` };
   XLSX.utils.book_append_sheet(wb, ws, 'Transakcie');
 
